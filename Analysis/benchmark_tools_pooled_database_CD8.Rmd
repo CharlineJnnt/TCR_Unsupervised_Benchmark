@@ -1,0 +1,1622 @@
+---
+title: "Benchmark tools using pooled database - alpha-beta pairing - CD8 cell subset"
+author: "Charline Jouannet"
+output: github_document
+  html_preview: false
+---
+
+```{r setup, include = FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo=TRUE, warning=F, message=F)
+```
+
+
+```{r Library}
+library(RCy3)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(ggpubr)
+library(viridis)
+library(vegan)
+library(pheatmap)
+library(RColorBrewer)
+library(ComplexHeatmap)
+```
+
+```{r initiation}
+list_method <- c("Hamming_Distance", "Levenshtein_Distance", "TCRMatch", "iSMART","GIANA", "clusTCR","GLIPH2", "DeepTCR", "TCRdist3")
+color_method <- c("darkorange", "cyan3", "darkorchid4", "grey", "brown1", "darkgoldenrod1", "pink", "chartreuse3", "black")
+```
+
+```{r Database and output Processing}
+#process the pooled database
+source("../Analysis/database_processing.R")
+#process output files from methods
+source("../Analysis/output_processing.R")
+```
+
+# Creation of network 
+
+```{r network}
+#create network
+source("../Functions/network_functions.R") 
+
+## Hamming Distance ##
+#color by chain type
+CDR3_clustered_HD <- data.frame(CDR3=unique(edge_list_HD$input_sequence))
+vertices_HD <- merge(CDR3_clustered_HD, liste_sequence_TRA_TRB_chain, by= "CDR3")
+#cytoscape
+vertices_HD <- merge(vertices_HD, output_HD, by = "CDR3")
+graph <- graph_from_data_frame(edge_list_HD, directed = FALSE, vertices = vertices_HD)
+#createNetworkFromIgraph(graph)
+
+
+## Levenshtein Distance ##
+#color by chain type
+CDR3_clustered_LD <- data.frame(CDR3=unique(edge_list_LD$input_sequence))
+vertices_LD <- merge(CDR3_clustered_LD, liste_sequence_TRA_TRB_chain, by= "CDR3")
+#cytoscape
+vertices_LD <- merge(vertices_LD, output_LD, by = "CDR3")
+graph <- graph_from_data_frame(edge_list_LD, directed = FALSE, vertices = vertices_LD)
+#createNetworkFromIgraph(graph)
+
+
+## TCRMatch ##
+#color by chain type
+CDR3_clustered_tcrmatch <- data.frame(CDR3=unique(edge_list_tcrm$input_sequence))
+vertices_tcrmatch <- merge(CDR3_clustered_tcrmatch, liste_sequence_TRA_TRB_chain, by= "CDR3", all.x= T)
+#cytoscape
+vertices_tcrmatch <- merge(vertices_tcrmatch, output_tcrm, by = "CDR3")
+graph <- graph_from_data_frame(edge_list_tcrm, directed = FALSE, vertices = vertices_tcrmatch)
+#createNetworkFromIgraph(graph)
+
+
+## iSMART ##
+ismart_list <- split(output_ismart, f = output_ismart$clusters)
+edge_list_ismart <- make_edges(ismart_list, "CDR3")#create edges list
+edge_list_ismart <- edge_list_ismart %>% filter(value == 1)
+colnames(edge_list_ismart) <- c("input_sequence", "match_sequence", "score", "cluster")
+edge_list_ismart <- edge_list_ismart %>% select(-cluster)
+#color by chain type
+CDR3_clustered_ismart <- data.frame(CDR3=unique(output_ismart$CDR3))
+vertices_ismart <- merge(CDR3_clustered_ismart, liste_sequence_TRA_TRB_chain, by= "CDR3")
+#cytoscape
+vertices_ismart <- merge(vertices_ismart , output_ismart, by = "CDR3")
+graph <- graph_from_data_frame(edge_list_ismart, directed = FALSE, vertices = vertices_ismart)
+#createNetworkFromIgraph(graph)
+
+
+## GIANA ##
+giana_list <- split(output_giana, f = output_giana$clusters)
+edge_list_giana <- make_edges(giana_list, "CDR3")
+edge_list_giana <- edge_list_giana %>% filter(value == 1)
+#color by chain type
+CDR3_clustered_giana <- data.frame(CDR3=unique(output_giana$CDR3))
+vertices_giana <- merge(CDR3_clustered_giana, liste_sequence_TRA_TRB_chain, by= "CDR3")
+#cytoscape
+vertices_giana <- merge(vertices_giana, output_giana, by = "CDR3")
+graph <- graph_from_data_frame(edge_list_giana, directed = FALSE, vertices = vertices_giana)
+#createNetworkFromIgraph(graph)
+
+
+## clusTCR ##
+from_edge_clustcr <- data.frame(CDR3b_CDR3a = unique(edge_list_clustcr$From))
+to_edge_clustcr <- data.frame(CDR3b_CDR3a = unique(edge_list_clustcr$To))#combine the two "from" and "to" lists from edge_list of clustcr output
+CDR3_clustered_clustcr <- rbind(from_edge_clustcr, to_edge_clustcr) %>% unique() %>% mutate(color_type = "black")
+vertices_clustcr <- merge(CDR3_clustered_clustcr, unique_pairing ,by="CDR3b_CDR3a", all.y = T)
+vertices_clustcr$color_type[is.na(vertices_clustcr$color_type)] <- "grey"
+#cytoscape
+vertices_clustcr <- merge(vertices_clustcr, output_clustcr_pairing, by = "CDR3b_CDR3a")
+graph <- graph_from_data_frame(edge_list_clustcr, directed = FALSE, vertices = vertices_clustcr)
+#createNetworkFromIgraph(graph)
+
+
+## GLIPH2 ##
+##graph## node = pairing alpha-beta
+gliph_pairing <- output_gliph %>% select(c(clusters, CDR3b, CDR3a, size, type_cluster))
+gliph_pairing_list <- split(gliph_pairing, f = gliph_pairing$clusters)
+
+#color edges based on type of cluster (global/motif)
+edge_list_gliph  <- make_edges_gliph2(gliph_pairing_list)
+edge_list_gliph  <- edge_list_gliph  %>% filter(value == 1)
+# 1.graph annotation
+#color by cluster type
+CDR3_clustered_gliph <- data.frame(CDR3b_CDR3a=output_gliph$CDR3b_CDR3a, cluster = output_gliph$clusters, type_cluster = output_gliph$type_cluster, size = output_gliph$size)
+vertices_gliph_merge <- CDR3_clustered_gliph %>% 
+  mutate(color_type = case_when(
+    type_cluster == "motif" ~ "blue",
+    type_cluster == "global" ~ "grey"))
+vertices_gliph_merge$CDR3_cluster <- paste(vertices_gliph_merge$CDR3b_CDR3a, vertices_gliph_merge$cluster, sep = "_")
+#color by specificity : highlight one specificity
+vertices_gliph_merge <- merge(vertices_gliph_merge, data_human[,c("CDR3b_CDR3a", "Epitope")], by = "CDR3b_CDR3a", all.x = T) %>% unique()
+vertices_gliph_list <- split(vertices_gliph_merge, f = vertices_gliph_merge$CDR3_cluster)
+vertices_gliph <- color_specificity(vertices_gliph_list, "NLVPMVATV", "red")
+vertices_gliph <- vertices_gliph%>% select(-CDR3b_CDR3a) %>% relocate(CDR3_cluster, .before = cluster) %>% unique()
+# 2.graph
+#cytoscape
+vertices_gliph <- vertices_gliph %>% mutate(CDR3b_CDR3a = CDR3_cluster) %>% separate(CDR3b_CDR3a, c('CDR3b_CDR3a', 'clusters_2')) %>% select(-clusters_2)
+graph <- graph_from_data_frame(edge_list_gliph, directed = FALSE, vertices = vertices_gliph)
+#createNetworkFromIgraph(graph)
+
+
+## DeepTCR ##
+deeptcr_pairing <- output_deeptcr %>% select(c(clusters, CDR3b, CDR3a, size))
+deeptcr_pairing$CDR3b_CDR3a <- paste(deeptcr_pairing$CDR3b, deeptcr_pairing$CDR3a, sep = "")
+deeptcr_pairing <- deeptcr_pairing %>% select(-c(CDR3b, CDR3a)) %>% unique()
+deeptcr_pairing_list <- split(deeptcr_pairing, f = deeptcr_pairing$clusters) 
+edge_list_deeptcr <- make_edges(deeptcr_pairing_list, "CDR3b_CDR3a")
+edge_list_deeptcr  <- dplyr::rename(edge_list_deeptcr , "CDR3b_CDR3a"="get(column)")
+#color by specificity: highlight one specificity
+CDR3_clustered_deeptcr <- data.frame(CDR3b_CDR3a = unique(edge_list_deeptcr$CDR3b_CDR3a))
+vertices_deeptcr_merge <- merge(CDR3_clustered_deeptcr, data_human[,c("CDR3b_CDR3a", "Epitope")], by = "CDR3b_CDR3a", all.x = T) %>% unique()
+vertices_deeptcr_list <- split(vertices_deeptcr_merge, f = vertices_deeptcr_merge$CDR3b_CDR3a)
+vertices_deeptcr <- color_specificity(vertices_deeptcr_list, "NLVPMVATV", "red")
+#cytoscape
+vertices_deeptcr <- merge(vertices_deeptcr, output_deeptcr[c("CDR3b_CDR3a", "clusters", "size")], by = "CDR3b_CDR3a")
+graph <- graph_from_data_frame(edge_list_deeptcr, directed = FALSE, vertices = vertices_deeptcr)
+#createNetworkFromIgraph(graph)
+
+
+## TCRdist3 ##
+CDR3_clustered_tcrdist <- data.frame(clone = unique(output_tcrdist$clone))
+#create edges from hierarchical clustering output using clones
+tcrdist_clone <- output_tcrdist %>% select(c(clusters, clone, size)) %>% unique()
+tcrdist_clone_list <- split(tcrdist_clone, f = tcrdist_clone$clusters)
+edge_list_tcrdist_clone <- make_edges(tcrdist_clone_list, "clone")
+edge_list_tcrdist_clone  <- dplyr::rename(edge_list_tcrdist_clone ,"clone"="get(column)") %>% filter(value !=0)
+#color by specificity: highlight one specificity
+data_human$clone <- paste(data_human$V_alpha, "*01_", data_human$CDR3_alpha, "_", data_human$J_alpha, "_", data_human$V_beta, "*01_", data_human$CDR3_beta, "_", data_human$J_beta, sep = "")
+vertices_tcrdist_merge <- merge(CDR3_clustered_tcrdist, data_human[,c("clone", "Epitope")], by.x = "clone", all.x = T) %>% unique()
+vertices_tcrdist_list <- split(vertices_tcrdist_merge, f = vertices_tcrdist_merge$clone)
+vertices_tcrdist <- color_specificity(vertices_tcrdist_list, "NLVPMVATV", "red")
+#cytoscape
+vertices_tcrdist <- merge(vertices_tcrdist, output_tcrdist[c("clone", "clusters", "size", "CDR3b_CDR3a")], by = "clone")
+graph <- graph_from_data_frame(edge_list_tcrdist_clone, directed = FALSE, vertices = vertices_tcrdist)
+#createNetworkFromIgraph(graph)
+```
+
+
+# Size distribution of output clusters
+
+```{r Size distribution, fig.dim=c(12,10)}
+cluster_HD <- output_HD %>% select(clusters, size) %>% mutate(method = "Hamming_Distance") %>% unique()
+cluster_LD <- output_LD %>% select(clusters, size) %>% mutate(method = "Levenshtein_Distance") %>% unique()
+cluster_tcrm <- output_tcrm %>% select(clusters, size) %>% mutate(method = "TCRMatch") %>% unique()
+cluster_ismart <- output_ismart %>% select(clusters, size) %>% mutate(method = "iSMART") %>% unique()
+cluster_giana <- output_giana %>% select(clusters, size) %>% mutate(method = "GIANA") %>% unique()
+cluster_clustcr <- output_clustcr_pairing %>% select(clusters, size) %>% mutate(method = "clusTCR") %>% unique()
+cluster_gliph <- output_gliph %>% select(clusters, size) %>% mutate(method = "GLIPH2") %>% unique()
+cluster_deeptcr <- output_deeptcr %>% select(clusters, size) %>% mutate(method = "DeepTCR") %>% unique()
+cluster_tcrdist <- output_tcrdist %>% select(clusters, size) %>% mutate(method = "TCRdist3") %>% unique()
+
+cluster_all <- list("Hamming_Distance"= cluster_HD, "Levenshtein_Distance"=cluster_LD, "TCRMatch"=cluster_tcrm, "iSMART"=cluster_ismart, "GIANA"=cluster_giana, "clusTCR"=cluster_clustcr, "GLIPH2"=cluster_gliph, "DeepTCR"=cluster_deeptcr, "TCRdist3"=cluster_tcrdist)
+color_method <- list("Hamming_Distance"= "orange", "Levenshtein_Distance"= "cyan3", "TCRMatch"= "darkorchid4", "iSMART"= "grey", "GIANA"= "brown1", "clusTCR"= "darkgoldenrod1", "GLIPH2"= "pink", "DeepTCR"= "chartreuse3", "TCRdist3"= "black")
+
+list_plot <- list()
+for(method in names(cluster_all)){
+  #print(method)
+  list_plot[[method]] <- plot_distribution_size(cluster_all[[method]], color_method[[method]], method)
+}
+
+#pdf("../Plot/clusterSizeDistribution.pdf", height = 10, width = 10)
+gridExtra::grid.arrange(list_plot[["DeepTCR"]], list_plot[["TCRdist3"]], list_plot[["GIANA"]], list_plot[["Hamming_Distance"]], list_plot[["Levenshtein_Distance"]], list_plot[["iSMART"]], list_plot[["GLIPH2"]], list_plot[["TCRMatch"]], list_plot[["clusTCR"]])
+#dev.off()
+
+```
+
+# Metrics: retention, purity, perc_clusters, perc_CDR3
+
+```{r}
+#import purity functions
+source("../Functions/purity_functions.R")
+```
+
+```{r purity, retention}
+#retention
+retention_HD <- round(n_distinct(output_HD$CDR3)/8395,2)#divided by the number of unique sequences
+retention_LD <- round(n_distinct(output_LD$CDR3)/8395,2)
+retention_tcrm <- round(n_distinct(output_tcrm$CDR3)/8395,2)
+retention_ismart <- round(n_distinct(output_ismart$CDR3)/8395,2)
+retention_giana <- round(n_distinct(output_giana$CDR3)/8395,2)
+
+retention_gliph <- round(n_distinct(output_gliph[c("CDR3b","CDR3a")])/4779,2)#divided by the number of unique pairs
+retention_clustcr <- round(n_distinct(output_clustcr_pairing$CDR3b_CDR3a)/4779,2)
+retention_deeptcr <- round(n_distinct(output_deeptcr[c("CDR3b","CDR3a")])/4779,2)
+retention_tcrdist <- round(n_distinct(output_tcrdist[c("CDR3b","CDR3a")])/4779,2)
+
+#purity
+th <- 1#threshold for cluster size - equal to 1, 3, 5 or 10
+
+purity_HD <- round(purity_function(output_HD, th),2)
+purity_LD <- round(purity_function(output_LD, th),2)
+purity_tcrm <- round(purity_function(output_tcrm, th),2)
+purity_ismart <- round(purity_function(output_ismart, th),2)
+purity_giana <- round(purity_function(output_giana, th),2)
+
+purity_clustcr <- round(purity_function(output_clustcr_pairing, th, "CDR3b_CDR3a"),2)
+purity_gliph <- round(purity_function(output_gliph, th, "CDR3b_CDR3a"),2)
+purity_deeptcr <- round(purity_function(output_deeptcr, th, "CDR3b_CDR3a"),2)
+purity_tcrdist <- round(purity_function(output_tcrdist, th, "CDR3b_CDR3a"),2)
+
+data_purity <- data.frame(method = c(list_method),
+                          threshold = rep(1, 9),
+                          purity = c(purity_HD, purity_LD, purity_tcrm, purity_ismart, purity_giana, purity_clustcr, purity_gliph, purity_deeptcr, purity_tcrdist))
+
+
+#retention & purity & consistency
+df_metric <- data.frame(methods   = list_method,
+                        retention = c(retention_HD, retention_LD, retention_tcrm, retention_ismart, retention_giana,  retention_clustcr,retention_gliph, retention_deeptcr, retention_tcrdist),
+                        purity = c(purity_HD, purity_LD, purity_tcrm, purity_ismart, purity_giana, purity_clustcr, purity_gliph, purity_deeptcr, purity_tcrdist))
+
+df_metric <-  df_metric %>% melt()
+
+df_metric$methods <- factor(df_metric$methods, level = list_method)
+df_metric$variable<- factor(df_metric$variable, level = c("retention", "purity"))
+
+#barplot
+# ggplot(df_metric, aes(x = variable, y = value, fill = methods)) +
+#   geom_bar(stat = "identity", position = "dodge", color = "white") +
+#   theme_classic() +
+#   scale_fill_manual(values = c("darkorange", "cyan3", "darkorchid4", "grey", "brown1", "pink", "darkgoldenrod1", "chartreuse3", "black"))+
+#   geom_text(aes(label = round(value, 2)), vjust = -0.5,
+#             position = position_dodge(0.9)) +
+#   scale_y_continuous(expand = c(0.0,0.01), limits = c(0,1.1))+
+#   theme(legend.position ="top")+
+#   labs(title = "Retention & Purity")
+
+#bubble plot
+ggplot(df_metric, aes(x=variable, y = methods, color = methods, size = value)) +
+  geom_point(alpha=0.5) +
+  scale_size(range = c(2, 12))+
+  theme_classic() +
+  scale_color_manual(values = color_method)+
+  geom_text(data=df_metric, aes(label=value), size=4, color = "black")
+```
+
+# Correlation between purity and retention
+
+```{r correlation between metrics}
+#correlation purity/retention
+corr_purity_retention <- data.frame(methods   = list_method,
+                        retention = c(retention_HD, retention_LD, retention_tcrm, retention_ismart, retention_giana, retention_clustcr, retention_gliph, retention_deeptcr, retention_tcrdist),
+                        purity = c(purity_HD, purity_LD, purity_tcrm, purity_ismart, purity_giana, purity_clustcr, purity_gliph, purity_deeptcr, purity_tcrdist))
+
+#pdf("../Plot/correlationPurityRetention.pdf")
+ggscatter(corr_purity_retention, x = "retention", y = "purity", 
+          add = "reg.line", conf.int = TRUE, label = "methods", repel = TRUE, cor.coeff.args = list(label.x = 0.1 , label.y = 0.1 ),
+          cor.coef = TRUE, cor.method = "pearson",cor.coef.size = 6,
+          xlab = "Retention", ylab = "Purity", font.label = c(15, "plain"))+
+  theme(legend.position = "right")+
+ font("xlab", size = 15)+
+ font("ylab", size = 15)+
+ font("xy.text", size = 12)
+#dev.off()
+
+#correlation between purity and cluster size
+# library(smplot2)
+# for(method_1 in list_method){
+#   subset <- purity_all_df %>% filter(method == method_1)
+#   print(ggplot(data = subset, mapping = aes(x = size, y = purity)) +
+#   geom_point(shape = 21, fill = color_method[[method_1]], color = 'white', size = 3) +
+#   sm_statCorr()+ggtitle(method_1))#pearson correlation by default
+# }
+# 
+# 
+# ggscatter(purity_all_df, x = "size", y = "purity", 
+#           add = "reg.line", conf.int = TRUE, 
+#           cor.coef = TRUE, cor.method = "pearson",
+#           xlab = "Cluster size", ylab = "Purity",
+#           color = "method", palette = c("darkorange", "cyan3", "darkorchid4", "grey", "brown1",  "darkgoldenrod1", "pink", "chartreuse3", "black"),
+#            facet.by = "method")
+```
+
+# Calculation of purity for each cluster to determine the percentage with purity >0.9
+
+```{r purity by cluster, fig.dim=c(8,10)}
+#1) Purity for each cluster
+purity_HD_df <- all_purity_onechain(output_HD, th) %>% mutate(method = "Hamming_Distance") 
+purity_LD_df <- all_purity_onechain(output_LD, th) %>% mutate(method = "Levenshtein_Distance")
+purity_tcrm_df <- all_purity_onechain(output_tcrm, th) %>% mutate(method = "TCRMatch")
+purity_ismart_df <- all_purity_onechain(output_ismart, th) %>% mutate(method = "iSMART") 
+purity_giana_df <- all_purity_onechain(output_giana, th) %>% mutate(method = "GIANA")
+
+purity_clustcr_df  <- all_purity_pairing(output_clustcr_pairing, "CDR3b_CDR3a") %>% mutate(method = "clusTCR")
+purity_gliph_df  <- all_purity_pairing(output_gliph, "CDR3b_CDR3a") %>% mutate(method = "GLIPH2") 
+purity_deeptcr_df  <- all_purity_pairing(output_deeptcr, "CDR3b_CDR3a") %>% mutate(method = "DeepTCR")
+purity_tcrdist_df <- all_purity_pairing(output_tcrdist, "CDR3b_CDR3a") %>% mutate(method = "TCRdist3")
+
+# purity_all_df <- rbind(purity_HD_df, purity_LD_df, purity_tcrm_df, purity_ismart_df ,purity_giana_df,
+#                         purity_clustcr_df, purity_gliph_df, purity_deeptcr_df, purity_tcrdist_df)
+# purity_all_df$method <- factor(purity_all_df$method, level = list_method)
+# 
+#boxplot
+# ggplot(purity_all_df, aes(x=method, y=purity)) + 
+#   geom_boxplot(trim=FALSE, aes(fill = method), alpha = 0.7)+
+#   scale_fill_manual(values = c("darkorange", "cyan3", "darkorchid4", "grey", "brown1", "pink", "darkgoldenrod1", "chartreuse3", "black"))+
+#   #geom_boxplot(width=0.1)+
+#   stat_summary(fun.data=mean_sdl, 
+#                  geom="pointrange", color="black")+
+#  
+#   geom_jitter(shape=16, position=position_jitter(0.2), aes(color = size))+
+#   scale_color_continuous(type = "viridis", trans = "reverse")+
+#   theme_classic()+
+#   ggtitle("Local Purity")
+
+#2) Percentage of clusters (with purity >0.9) and percentage of CDR3 sequences/pairs in these clusters
+purity_gliph_df  <- merge(purity_gliph_df, output_gliph[,c("clusters", "CDR3b_CDR3a")], by = "clusters")
+purity_tcrdist_df  <- merge(purity_tcrdist_df, output_tcrdist[,c("clusters", "CDR3b_CDR3a")], by = "clusters")
+
+purity_clusters <- data.frame(methods = list_method,
+                             perc_clusters = c(n_distinct(filter(purity_HD_df, purity >= 0.9)$clusters)/n_distinct(purity_HD_df$clusters),
+                                               n_distinct(filter(purity_LD_df, purity >= 0.9)$clusters)/n_distinct(purity_LD_df$clusters),
+                                               n_distinct(filter(purity_tcrm_df, purity >=0.9)$clusters)/n_distinct(purity_tcrm_df$clusters),
+                                               n_distinct(filter(purity_ismart_df, purity >= 0.9)$clusters)/n_distinct(purity_ismart_df$clusters),
+                                               n_distinct(filter(purity_giana_df, purity >= 0.9)$clusters)/n_distinct(purity_giana_df$clusters),
+                                               n_distinct(filter(purity_clustcr_df, purity >= 0.9)$clusters)/n_distinct(purity_clustcr_df$clusters),
+                                               n_distinct(filter(purity_gliph_df, purity >= 0.9)$clusters)/n_distinct(purity_gliph_df$clusters),
+                                               n_distinct(filter(purity_deeptcr_df, purity >= 0.9)$clusters)/n_distinct(purity_deeptcr_df$clusters),
+                                               n_distinct(filter(purity_tcrdist_df, purity >= 0.9)$clusters)/n_distinct(purity_tcrdist_df$clusters)),
+                             perc_CDR3s =  c(sum(filter(purity_HD_df, purity >= 0.9)$size)/sum(purity_HD_df$size),
+                                             sum(filter(purity_LD_df, purity >= 0.9)$size)/sum(purity_LD_df$size),
+                                             sum(filter(purity_tcrm_df, purity >= 0.9)$size)/sum(purity_tcrm_df$size),
+                                             sum(filter(purity_ismart_df, purity >= 0.9)$size)/sum(purity_ismart_df$size),
+                                             sum(filter(purity_giana_df, purity >= 0.9)$size)/sum(purity_giana_df$size),
+                                             sum(filter(purity_clustcr_df, purity >= 0.9)$size)/sum(purity_clustcr_df$size),
+                                             n_distinct(filter(purity_gliph_df, purity >= 0.9)$CDR3b_CDR3a)/n_distinct(purity_gliph_df$CDR3b_CDR3a),
+                                             sum(filter(purity_deeptcr_df, purity >= 0.9)$size)/sum(purity_deeptcr_df$size),
+                                             n_distinct(filter(purity_tcrdist_df, purity >= 0.9)$CDR3b_CDR3a)/n_distinct(purity_tcrdist_df$CDR3b_CDR3a)))
+                             
+
+purity_clusters <- melt(purity_clusters)
+
+purity_clusters$methods <- factor(purity_clusters$methods, level = list_method)
+
+#barplot 
+# ggplot(purity_clusters, aes(x = variable, y = value, fill = methods)) +
+#   geom_bar(stat = "identity", position = "dodge", color = "white") +
+#   theme_bw() +
+#   scale_fill_manual(values = c("darkorange", "cyan3", "darkorchid4", "grey", "brown1", "darkgoldenrod1", "pink", "chartreuse3", "black"))+
+#   geom_text(aes(label = round(value, 2)), vjust = -0.5,
+#             position = position_dodge(0.9)) +
+#   #scale_y_continuous(expand = c(0,100), limits = c(0,100))+
+#   #scale_y_continuous(expand = c(0.0,0.01), limits = c(0,1.1))+
+#   theme(legend.position ="top")+
+#   labs(title = "Purity (>=0.9)")+
+#   ylab("Fraction")
+
+
+#Bubbleplot of all metrics: retention, purity, perc_clusters (purity >0.9) and perc_CDR3 in these clusters
+purity_clusters$value <- round(purity_clusters$value,2)
+df_all_metric <- rbind(df_metric, purity_clusters)
+
+df_all_metric$methods <- factor(df_all_metric$methods, level = rev(list_method))
+
+#pdf("../Plot/AllMetricsTh_1.pdf", width = 10)
+ggplot(df_all_metric, aes(x=variable, y = methods, color = value, size = value)) +
+  geom_point(alpha=0.7) +
+  scale_size(range = c(2, 12))+
+  theme_bw() +
+  scale_color_viridis(discrete = F, direction = -1)+
+  geom_text(data=df_all_metric, aes(label=value), size=4, color = "black",vjust=-2)+
+  theme(legend.position ="right",
+        plot.title = element_text(hjust=0.5),
+        legend.text=element_text(size=15),
+        legend.title=element_text(size=15),
+        text=element_text(size=15),
+        axis.text=element_text(size=15))+
+  ylab("")+
+  xlab("")+
+  guides(color=guide_legend(), size = guide_legend())+
+  ggtitle(paste0("cluster_size >", th))
+#dev.off()
+
+```
+
+# purity in function of the chain type
+
+```{r purity for chain}
+#check if clusters are homogeneous according chain type
+purity_HD <- purity_chain_function(output_HD)
+purity_LD <- purity_chain_function(output_LD)
+purity_tcrm <- purity_chain_function(output_tcrm)
+purity_ismart <- purity_chain_function(output_ismart)
+purity_giana <- purity_chain_function(output_giana)
+
+df_purity_chain <- data.frame(methods   = c("Hamming_Distance", "Levenshtein_Distance", "TCRMatch", "iSMART", "GIANA"),
+                        purity = c(purity_HD, purity_LD, purity_tcrm, purity_ismart, purity_giana))
+df_purity_chain$methods <- factor(df_purity_chain$methods, level = c("Hamming_Distance", "Levenshtein_Distance", "TCRMatch", "iSMART", "GIANA"))
+
+#pdf("../Plot/purityChain.pdf")
+ggplot(df_purity_chain, aes(x=methods, y=purity)) +
+    geom_segment(aes(xend=methods, yend=0)) +
+    geom_point(size=4, color=c("darkorange", "cyan3", "darkorchid4", "grey", "brown1")) +
+    theme_bw() +
+    xlab("")+
+  theme(axis.text.x=element_text(angle = 45, hjust = 1),
+        legend.text=element_text(size=15),
+        legend.title=element_text(size=15),
+        text=element_text(size=15),
+        axis.text=element_text(size=15))+
+  ylab("Purity")
+#dev.off()
+```
+
+# Evolution of metrics when threshold varie (not in paper)
+
+```{r evolution of purity when th varies}
+#1. Purity
+threshold <- c(1, 3, 5, 10)
+data_purity_all <- data.frame()
+for(th in threshold){
+  #print(th)
+  purity_HD <- round(purity_function(output_HD, th),2)
+  purity_LD <- round(purity_function(output_LD, th),th)
+  purity_tcrm <- round(purity_function(output_tcrm, th),th)
+  purity_ismart <- round(purity_function(output_ismart, th),th)
+  purity_giana <- round(purity_function(output_giana, th),th)
+  
+  purity_clustcr <- round(purity_function(output_clustcr_pairing, th, "CDR3b_CDR3a"),th)
+  purity_gliph <- round(purity_function(output_gliph, th, "CDR3b_CDR3a"),th)
+  purity_deeptcr <- round(purity_function(output_deeptcr, th, "CDR3b_CDR3a"),th)
+  purity_tcrdist <- round(purity_function(output_tcrdist, th, "CDR3b_CDR3a"),th)
+  
+  data_purity <- data.frame(method = c(list_method),
+                          threshold = rep(th, 9),
+                          purity = c(purity_HD, purity_LD, purity_tcrm, purity_ismart, purity_giana, purity_clustcr, purity_gliph, purity_deeptcr, purity_tcrdist))
+  data_purity_all <- rbind(data_purity_all, data_purity)
+  
+}
+
+data_purity_all$method <- factor(data_purity_all$method, levels = list_method)
+data_purity_all$threshold <- as.character(data_purity_all$threshold)
+data_purity_all$threshold[data_purity_all$threshold == "1"] <- "all"
+data_purity_all$threshold <- factor(data_purity_all$threshold, levels = c("all", "3", "5", "10"))
+
+ggplot(data = data_purity_all, aes(x = threshold, y = purity, color = method, group = method))+
+  geom_point()+geom_line()+
+  theme_bw()+
+  scale_color_manual(values = c("darkorange", "cyan3", "darkorchid4", "grey", "brown1", "darkgoldenrod1", "pink", "chartreuse3", "black"))+
+  ylim(0,1)
+
+#2. Percentage of clusters/CDR3s
+percentage_cluster_all <- data.frame()
+percentage_CDR3s_all <- data.frame()
+for(th in threshold){
+  #print(th)
+  purity_HD_df <- all_purity_onechain(output_HD, th) %>% mutate(method = "Hamming_Distance") %>% mutate(method_type = "alpha_or_beta")
+  purity_LD_df <- all_purity_onechain(output_LD, th) %>% mutate(method = "Levenshtein_Distance") %>% mutate(method_type = "alpha_or_beta")
+  purity_tcrm_df <- all_purity_onechain(output_tcrm, th) %>% mutate(method = "TCRMatch") %>% mutate(method_type = "alpha_or_beta")
+  purity_ismart_df <- all_purity_onechain(output_ismart, th) %>% mutate(method = "iSMART") %>% mutate(method_type = "alpha_or_beta")
+  purity_giana_df <- all_purity_onechain(output_giana, th) %>% mutate(method = "GIANA") %>% mutate(method_type = "alpha_or_beta")
+  
+  purity_clustcr_df  <- all_purity_pairing(output_clustcr_pairing, "CDR3b_CDR3a") %>% mutate(method = "clusTCR") %>% mutate(method_type = "alpha_beta_pairing")
+  purity_gliph_df  <- all_purity_pairing(output_gliph, "CDR3b_CDR3a") %>% mutate(method = "GLIPH2") %>% mutate(method_type = "alpha_beta_pairing")
+  purity_deeptcr_df  <- all_purity_pairing(output_deeptcr, "CDR3b_CDR3a") %>% mutate(method = "DeepTCR") %>% mutate(method_type = "alpha_beta_pairing")
+  purity_tcrdist_df <- all_purity_pairing(output_tcrdist, "CDR3b_CDR3a") %>% mutate(method = "TCRdist") %>% mutate(method_type = "alpha_beta_pairing")
+  
+  purity_all_df <- rbind(purity_HD_df, purity_LD_df, purity_tcrm_df, purity_ismart_df ,purity_giana_df,
+                          purity_clustcr_df, purity_gliph_df, purity_deeptcr_df, purity_tcrdist_df)
+  purity_all_df$method <- factor(purity_all_df$method, level = c("Hamming_Distance", "Levenshtein_Distance", "TCRMatch", "iSMART", "GIANA", "GLIPH2", "clusTCR", "DeepTCR", "TCRdist"))
+  
+  purity_gliph_df  <- merge(purity_gliph_df, output_gliph[,c("clusters", "CDR3b_CDR3a")], by = "clusters")
+  purity_tcrdist_df  <- merge(purity_tcrdist_df, output_tcrdist[,c("clusters", "CDR3b_CDR3a")], by = "clusters")
+  
+  purity_clusters <- data.frame(methods = c("Hamming_Distance", "Levenshtein_Distance", "TCRMatch", "iSMART", "GIANA", "clusTCR","GLIPH2", "DeepTCR", "TCRdist"),
+                               perc_clusters = c(n_distinct(filter(purity_HD_df, purity >= 0.9)$clusters)/n_distinct(purity_HD_df$clusters),
+                                                 n_distinct(filter(purity_LD_df, purity >= 0.9)$clusters)/n_distinct(purity_LD_df$clusters),
+                                                 n_distinct(filter(purity_tcrm_df, purity >=0.9)$clusters)/n_distinct(purity_tcrm_df$clusters),
+                                                 n_distinct(filter(purity_ismart_df, purity >= 0.9)$clusters)/n_distinct(purity_ismart_df$clusters),
+                                                 n_distinct(filter(purity_giana_df, purity >= 0.9)$clusters)/n_distinct(purity_giana_df$clusters),
+                                                 n_distinct(filter(purity_clustcr_df, purity >= 0.9)$clusters)/n_distinct(purity_clustcr_df$clusters),
+                                                 n_distinct(filter(purity_gliph_df, purity >= 0.9)$clusters)/n_distinct(purity_gliph_df$clusters),
+                                                 n_distinct(filter(purity_deeptcr_df, purity >= 0.9)$clusters)/n_distinct(purity_deeptcr_df$clusters),
+                                                 n_distinct(filter(purity_tcrdist_df, purity >= 0.9)$clusters)/n_distinct(purity_tcrdist_df$clusters)),
+                               perc_CDR3s =  c(sum(filter(purity_HD_df, purity >= 0.9)$size)/sum(purity_HD_df$size),
+                                               sum(filter(purity_LD_df, purity >= 0.9)$size)/sum(purity_LD_df$size),
+                                               sum(filter(purity_tcrm_df, purity >= 0.9)$size)/sum(purity_tcrm_df$size),
+                                               sum(filter(purity_ismart_df, purity >= 0.9)$size)/sum(purity_ismart_df$size),
+                                               sum(filter(purity_giana_df, purity >= 0.9)$size)/sum(purity_giana_df$size),
+                                               sum(filter(purity_clustcr_df, purity >= 0.9)$size)/sum(purity_clustcr_df$size),
+                                               n_distinct(filter(purity_gliph_df, purity >= 0.9)$CDR3b_CDR3a)/n_distinct(purity_gliph_df$CDR3b_CDR3a),
+                                               sum(filter(purity_deeptcr_df, purity >= 0.9)$size)/sum(purity_deeptcr_df$size),
+                                               n_distinct(filter(purity_tcrdist_df, purity >= 0.9)$CDR3b_CDR3a)/n_distinct(purity_tcrdist_df$CDR3b_CDR3a)))
+                               
+  
+  
+  purity_clusters <- purity_clusters %>% mutate(threshold = rep(th,9))
+  percentage_cluster <- purity_clusters[,c("methods", "threshold", "perc_clusters")]
+  percentage_CDR3s <- purity_clusters[,c("methods", "threshold", "perc_CDR3s")]
+  
+  percentage_cluster_all <- rbind(percentage_cluster_all, percentage_cluster)
+  percentage_CDR3s_all <- rbind(percentage_CDR3s_all, percentage_CDR3s)
+}
+
+percentage_cluster_all$methods <- factor(percentage_cluster_all$methods, levels = list_method)
+percentage_cluster_all$threshold <- as.character(percentage_cluster_all$threshold)
+percentage_cluster_all$threshold[ percentage_cluster_all$threshold == "1"] <- "all"
+percentage_cluster_all$threshold <- factor(percentage_cluster_all$threshold, levels = c("all", "3", "5", "10"))
+
+percentage_CDR3s_all$methods <- factor(percentage_CDR3s_all$methods, levels = list_method)
+percentage_CDR3s_all$threshold <- as.character(percentage_CDR3s_all$threshold)
+percentage_CDR3s_all$threshold[ percentage_CDR3s_all$threshold == "1"] <- "all"
+percentage_CDR3s_all$threshold <- factor(percentage_CDR3s_all$threshold, levels = c("all", "3", "5", "10"))
+
+ggplot(data = percentage_CDR3s_all, aes(x = threshold, y = perc_CDR3s, color = methods, group = methods))+
+  geom_point()+geom_line()+
+  theme_bw()+
+  scale_color_manual(values = c("darkorange", "cyan3", "darkorchid4", "grey", "brown1", "darkgoldenrod1", "pink", "chartreuse3", "black"))+
+  ylim(0,1)+
+  ylab("Percentage (%)")
+```
+
+# Re-Calculation of metrics for alpha and beta independently
+
+```{r metrics separating alpha & beta clusters, fig.dim=c(12,10)}
+th <- 1
+#retention
+retention_HD_alpha <- round(n_distinct(output_HD_alpha$CDR3)/4103,2)#divided by the number of unique alpha sequences
+retention_LD_alpha <- round(n_distinct(output_LD_alpha$CDR3)/4103,2)
+retention_tcrm_alpha <- round(n_distinct(output_tcrm_alpha$CDR3)/4103,2)
+retention_ismart_alpha <- round(n_distinct(output_ismart_alpha$CDR3)/4103,2)
+retention_giana_alpha <- round(n_distinct(output_giana_alpha$CDR3)/4103,2)
+
+retention_HD_beta <- round(n_distinct(output_HD_beta$CDR3)/4292,2)#divided by the number of unique beta sequences
+retention_LD_beta <- round(n_distinct(output_LD_beta$CDR3)/4292,2)
+retention_tcrm_beta <- round(n_distinct(output_tcrm_beta$CDR3)/4292,2)
+retention_ismart_beta <- round(n_distinct(output_ismart_beta$CDR3)/4292,2)
+retention_giana_beta <- round(n_distinct(output_giana_beta$CDR3)/4292,2)
+
+#purity
+purity_HD_alpha <- round(purity_function(output_HD_alpha, th),2)
+purity_LD_alpha <- round(purity_function(output_LD_alpha, th),2)
+purity_tcrm_alpha <- round(purity_function(output_tcrm_alpha, th),2)
+purity_ismart_alpha <- round(purity_function(output_ismart_alpha, th),2)
+purity_giana_alpha <- round(purity_function(output_giana_alpha, th),2)
+
+purity_HD_beta <- round(purity_function(output_HD_beta, th),2)
+purity_LD_beta <- round(purity_function(output_LD_beta, th),2)
+purity_tcrm_beta <- round(purity_function(output_tcrm_beta, th),2)
+purity_ismart_beta <- round(purity_function(output_ismart_beta, th),2)
+purity_giana_beta <- round(purity_function(output_giana_beta, th),2)
+
+#purity by clusters
+purity_HD_df_alpha <- all_purity_onechain(output_HD_alpha, th) %>% mutate(method = "Hamming_Distance") %>% mutate(chain = "alpha")
+purity_LD_df_alpha <- all_purity_onechain(output_LD_alpha, th) %>% mutate(method = "Levenshtein_Distance") %>% mutate(chain = "alpha")
+purity_tcrm_df_alpha <- all_purity_onechain(output_tcrm_alpha, th) %>% mutate(method = "TCRMatch") %>% mutate(chain = "alpha")
+purity_ismart_df_alpha <- all_purity_onechain(output_ismart_alpha, th) %>% mutate(method = "iSMART")%>% mutate(chain = "alpha")
+purity_giana_df_alpha <- all_purity_onechain(output_giana_alpha, th) %>% mutate(method = "GIANA") %>% mutate(chain = "alpha")
+
+purity_HD_df_beta <- all_purity_onechain(output_HD_beta, th) %>% mutate(method = "Hamming_Distance") %>% mutate(chain = "beta")
+purity_LD_df_beta <- all_purity_onechain(output_LD_beta, th) %>% mutate(method = "Levenshtein_Distance") %>% mutate(chain = "beta")
+purity_tcrm_df_beta <- all_purity_onechain(output_tcrm_beta, th) %>% mutate(method = "TCRMatch") %>% mutate(chain = "beta")
+purity_ismart_df_beta <- all_purity_onechain(output_ismart_beta, th) %>% mutate(method = "iSMART")%>% mutate(chain = "beta")
+purity_giana_df_beta <- all_purity_onechain(output_giana_beta, th) %>% mutate(method = "GIANA") %>% mutate(chain = "beta")
+
+#Percentage of clusters (purity >0.9) and percentage of correctly clustered unique CDR3β sequences
+purity_clusters_alpha <- data.frame(methods = c("Hamming_Distance", "Levenshtein_Distance", "TCRMatch", "iSMART", "GIANA"),
+                             retention = c(retention_HD_alpha, retention_LD_alpha, retention_tcrm_alpha, retention_ismart_alpha, retention_giana_alpha), 
+                             purity= c(purity_HD_alpha, purity_LD_alpha, purity_tcrm_alpha, purity_ismart_alpha, purity_giana_alpha),
+                             perc_clusters = c(n_distinct(filter(purity_HD_df_alpha, purity >= 0.9)$clusters)/n_distinct(purity_HD_df_alpha$clusters),
+                                               n_distinct(filter(purity_LD_df_alpha, purity >= 0.9)$clusters)/n_distinct(purity_LD_df_alpha$clusters),
+                                               n_distinct(filter(purity_tcrm_df_alpha, purity >=0.9)$clusters)/n_distinct(purity_tcrm_df_alpha$clusters),
+                                               n_distinct(filter(purity_ismart_df_alpha, purity >= 0.9)$clusters)/n_distinct(purity_ismart_df_alpha$clusters),
+                                               n_distinct(filter(purity_giana_df_alpha, purity >= 0.9)$clusters)/n_distinct(purity_giana_df_alpha$clusters)
+                                               ),
+                             perc_CDR3s =  c(sum(filter(purity_HD_df_alpha, purity >= 0.9)$size)/sum(purity_HD_df_alpha$size),
+                                             sum(filter(purity_LD_df_alpha, purity >= 0.9)$size)/sum(purity_LD_df_alpha$size),
+                                             sum(filter(purity_tcrm_df_alpha, purity >= 0.9)$size)/sum(purity_tcrm_df_alpha$size),
+                                             sum(filter(purity_ismart_df_alpha, purity >= 0.9)$size)/sum(purity_ismart_df_alpha$size),
+                                             sum(filter(purity_giana_df_alpha, purity >= 0.9)$size)/sum(purity_giana_df_alpha$size)),
+                             chain = rep("alpha", 5)
+                                             )
+
+purity_clusters_beta <- data.frame(methods = c("Hamming_Distance", "Levenshtein_Distance", "TCRMatch", "iSMART", "GIANA"),
+                             retention = c(retention_HD_beta, retention_LD_beta, retention_tcrm_beta, retention_ismart_beta, retention_giana_beta),
+                             purity=c(purity_HD_beta, purity_LD_beta, purity_tcrm_beta, purity_ismart_beta, purity_giana_beta),
+                             perc_clusters = c(n_distinct(filter(purity_HD_df_beta, purity >= 0.9)$clusters)/n_distinct(purity_HD_df_beta$clusters),
+                                               n_distinct(filter(purity_LD_df_beta, purity >= 0.9)$clusters)/n_distinct(purity_LD_df_beta$clusters),
+                                               n_distinct(filter(purity_tcrm_df_beta, purity >=0.9)$clusters)/n_distinct(purity_tcrm_df_beta$clusters),
+                                               n_distinct(filter(purity_ismart_df_beta, purity >= 0.9)$clusters)/n_distinct(purity_ismart_df_beta$clusters),
+                                               n_distinct(filter(purity_giana_df_beta, purity >= 0.9)$clusters)/n_distinct(purity_giana_df_beta$clusters)
+                                               ),
+                             perc_CDR3s =  c(sum(filter(purity_HD_df_beta, purity >= 0.9)$size)/sum(purity_HD_df_beta$size),
+                                             sum(filter(purity_LD_df_beta, purity >= 0.9)$size)/sum(purity_LD_df_beta$size),
+                                             sum(filter(purity_tcrm_df_beta, purity >= 0.9)$size)/sum(purity_tcrm_df_beta$size),
+                                             sum(filter(purity_ismart_df_beta, purity >= 0.9)$size)/sum(purity_ismart_df_beta$size),
+                                             sum(filter(purity_giana_df_beta, purity >= 0.9)$size)/sum(purity_giana_df_beta$size)),
+                             chain = rep("beta", 5)
+                                             )
+                             
+
+
+purity_clusters_alpha <- melt(purity_clusters_alpha)
+purity_clusters_beta <- melt(purity_clusters_beta)
+
+purity_clusters_chain <- rbind(purity_clusters_alpha, purity_clusters_beta)
+
+list_plot <- list()
+for(method in unique(purity_clusters_chain$method)){
+  purity_clusters_chain_subset <- purity_clusters_chain %>% filter(methods== method)
+  
+  list_plot[[method]] <- ggplot(data = purity_clusters_chain_subset, aes(x=variable, y = value, fill = chain))+
+    geom_bar(stat="identity", position=position_dodge())+
+    theme_bw()+
+    ggtitle(method)+
+    scale_fill_manual(values= alpha(c("chartreuse3","darkorange2"), 0.7))+
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))+
+    ylab("")+xlab("")+ylim(0,1)
+  
+  legend <- get_legend(list_plot[[method]])
+  list_plot[[method]] <- list_plot[[method]]+theme(legend.position="none")
+
+}
+#pdf("../Plot/AllMetricsTh_1_byChain.pdf")
+grid.arrange(list_plot[["Hamming_Distance"]], list_plot[["Levenshtein_Distance"]], list_plot[["TCRMatch"]], list_plot[["iSMART"]] , list_plot[["GIANA"]],
+             legend, ncol=2)
+#dev.off()
+```
+
+# Number of output clusters for each cluster size threshold
+
+```{r number of clusters for each size threshold}
+#Supplementary Table 3
+list_output <- list("Hamming_Distance" = output_HD, "Levenshtein_Distance"=output_LD, "TCRMatch"= output_tcrm, "GIANA"= output_giana, "iSMART" = output_ismart, "clusTCR" = output_clustcr_pairing, "GLIPH2" = output_gliph,"DeepTCR" = output_deeptcr, "TCRdist3" = output_tcrdist)
+th_list <- c(3,5,10)
+df_nb_cluster_all <- data.frame()
+for(th in th_list){
+  #print(th)
+  df_nb_cluster <- data.frame()
+  for(method in names(list_output)){
+    output <- filter(list_output[[method]], size > th)
+    df <- data.frame(methods = method, nb_clusters = n_distinct(output$clusters), threshold =th) 
+    df_nb_cluster <- rbind(df_nb_cluster, df)
+  }
+  df_nb_cluster_all <- rbind(df_nb_cluster_all, df_nb_cluster)
+}
+```
+
+# Overlap of clustered sequences between methods (Upset plot) (not in paper)
+
+```{r upset plot}
+list_method_1 <- c("Hamming_Distance", "Levenshtein_Distance", "TCRMatch", "iSMART", "GIANA")
+list_method_2 <- c("clusTCR", "GLIPH2", "DeepTCR", "TCRdist3")
+list_method <- c("Hamming_Distance", "Levenshtein_Distance", "TCRMatch", "iSMART", "GIANA", "clusTCR", "GLIPH2", "DeepTCR", "TCRdist3")
+
+#list_method_1
+m_alpha <- make_comb_mat(Hamming_Distance = output_HD_alpha$CDR3, Levenshtein_Distance = output_LD_alpha$CDR3, TCRMatch = output_tcrm_alpha$CDR3, iSMART = output_ismart_alpha$CDR3, GIANA = output_giana_alpha$CDR3, mode = "intersect")
+
+m_beta <- make_comb_mat(Hamming_Distance = output_HD_beta$CDR3, Levenshtein_Distance = output_LD_beta$CDR3, TCRMatch = output_tcrm_beta$CDR3, iSMART = output_ismart_beta$CDR3, GIANA = output_giana_beta$CDR3, mode = "intersect")
+
+color_set <- c("darkorange" = "Hamming_Distance", 
+               "cyan3" = "Levenshtein_Distance",
+               "darkorchid4" = "TCRMatch",
+               "grey" = "iSMART",
+               "brown3" = "GIANA")
+
+#list_method_2
+# m_alpha <- make_comb_mat(clusTCR = output_clustcr_alpha$CDR3, GLIPH2 = output_gliph_alpha$CDR3, DeepTCR = output_deeptcr_alpha$CDR3, TCRdist3 = output_tcrdist_alpha$CDR3, mode = "intersect")
+# 
+# m_beta <- make_comb_mat(clusTCR = output_clustcr_beta$CDR3, GLIPH2 = output_gliph_beta$CDR3, DeepTCR = output_deeptcr_beta$CDR3, TCRdist3 = output_tcrdist_beta$CDR3, mode = "intersect")
+# 
+# color_set <- c("darkgoldenrod1" = "clusTCR", 
+#                "lightpink" = "GLIPH2",
+#                "chartreuse3" = "DeepTCR",
+#                "black" = "TCRdist3")
+#all
+# m_alpha <- make_comb_mat(Hamming_Distance = output_HD_alpha$CDR3, Levenshtein_Distance = output_LD_alpha$CDR3, TCRMatch = output_tcrm_alpha$CDR3, iSMART = output_ismart_alpha$CDR3, GIANA = output_giana_alpha$CDR3, clusTCR = output_clustcr_alpha$CDR3, GLIPH2 = output_gliph_alpha$CDR3, DeepTCR = output_deeptcr_alpha$CDR3, TCRdist3 = output_tcrdist_alpha$CDR3, mode = "intersect")
+# 
+# m_beta <- make_comb_mat(Hamming_Distance = output_HD_beta$CDR3, Levenshtein_Distance = output_LD_beta$CDR3, TCRMatch = output_tcrm_beta$CDR3, iSMART = output_ismart_beta$CDR3, GIANA = output_giana_beta$CDR3, clusTCR = output_clustcr_beta$CDR3, GLIPH2 = output_gliph_beta$CDR3, DeepTCR = output_deeptcr_beta$CDR3, TCRdist3 = output_tcrdist_beta$CDR3, mode = "intersect")
+# 
+# color_set <- c("darkorange" = "Hamming_Distance", 
+#                "cyan3" = "Levenshtein_Distance",
+#                "darkorchid4" = "TCRMatch",
+#                "grey" = "iSMART",
+#                "brown3" = "GIANA",
+#                "darkgoldenrod1" = "clusTCR", 
+#                "lightpink" = "GLIPH2",
+#                "chartreuse3" = "DeepTCR",
+#                "black" = "TCRdist3")
+
+#chain
+#m <- m_alpha
+m <- m_beta
+#m <- m[comb_degree(m) == 9]
+cs = comb_size(m)
+ss = set_size(m)
+
+color_set <- color_set[which(color_set %in% names(ss))]
+
+#list of methods
+list_methods <- list_method_1
+#list_methods <- list_method_2
+#list_methods <- list_method
+
+
+UpSet_bis(m,
+      comb_col = names(color_set[match(names(ss), color_set)]),
+      set_order = list_methods,
+      show_column_names = FALSE, lgd_color = color_set,
+      right_annotation = rowAnnotation(
+      "Set size" = anno_barplot(ss, 
+                                ylim = c(0, max(ss)*1.1),
+                                border = FALSE, 
+                                gp = gpar(fill = names(color_set[match(names(ss), color_set)])), 
+                                width = unit(6, "cm"), 
+                                add_numbers = TRUE, 
+                                numbers_rot = 0, 
+                                axis_param = list(side = "top")), 
+                                annotation_name_side = "top"),
+      top_annotation = HeatmapAnnotation(
+      "Intersection size" = anno_barplot(cs, 
+                                         ylim = c(0, max(cs)*1.1),
+                                         border = FALSE,
+                                         gp = gpar(fill = "gray28"),
+                                         add_numbers = T, 
+                                         numbers_rot = 0, 
+                                         height = unit(4, "cm"), 
+                                         width = unit(1, "cm"), 
+                                         axis_param = list(side = "left")), 
+                                         show_legend = TRUE,
+                                         annotation_name_side = "left",
+                                         annotation_name_rot = 90))
+
+
+
+```
+
+# Jaccard Similarity index between sequences clustered by method (not in paper)
+
+```{r Jaccard similarity}
+source("../Functions/alignment_functions.R")
+chain <-"b"
+# 1.sequence similarity between method
+list_alignement_HD <- list_alignement_fun("Hamming_Distance", output_HD, chain)
+list_alignement_LD <- list_alignement_fun("Levenshtein_Distance", output_LD, chain)
+list_alignement_tcrm <- list_alignement_fun("TCRMatch", output_tcrm, chain)
+list_alignement_ismart <- list_alignement_fun("iSMART", output_ismart, chain)
+list_alignement_giana <- list_alignement_fun("GIANA", output_giana, chain)
+list_alignement_clustcr <- list_alignement_fun("clusTCR", output_clustcr_pairing, chain)
+list_alignement_gliph <- list_alignement_fun("GLIPH2", output_gliph, chain)
+list_alignement_deeptcr <- list_alignement_fun("DeepTCR", output_deeptcr, chain)
+list_alignement_tcrdist <- list_alignement_fun("TCRdist", output_tcrdist, chain)
+
+df_HD <- rbindlist(list_alignement_HD) %>% mutate(method = "Hamming_Distance", effectif = 1)
+df_LD <- rbindlist(list_alignement_LD) %>% mutate(method = "Levenshtein_Distance", effectif = 1)
+df_tcrm <- rbindlist(list_alignement_tcrm) %>% mutate(method = "TCRMatch", effectif = 1)
+df_ismart <- rbindlist(list_alignement_ismart) %>% mutate(method = "iSMART", effectif = 1)
+df_giana <- rbindlist(list_alignement_giana) %>% mutate(method = "GIANA", effectif = 1)
+df_clustcr <- rbindlist(list_alignement_clustcr) %>% mutate(method = "clusTCR", effectif = 1)
+df_gliph <- rbindlist(list_alignement_gliph) %>% mutate(method = "GLIPH2", effectif = 1)
+df_deeptcr <- rbindlist(list_alignement_deeptcr) %>% mutate(method = "DeepTCR", effectif = 1)
+df_tcrdist <- rbindlist(list_alignement_tcrdist) %>% mutate(method = "TCRdist", effectif = 1)
+
+df_cluster_all_1 <- rbind(df_clustcr, df_deeptcr, df_tcrdist, df_gliph)
+colnames(df_cluster_all_1)[2] <- "CDR3"
+df_cluster_all <- rbind(df_HD, df_LD, df_tcrm, df_ismart, df_giana, df_cluster_all_1)
+
+df_cluster_all <- dcast(df_cluster_all, method ~ CDR3, fun = sum)
+df_cluster_all[is.na(df_cluster_all)] <- 0
+df_cluster_all <- as.data.frame(df_cluster_all)
+df_cluster_all <- remove_first_column(df_cluster_all)
+
+jaccard_matrix <- 1-(as.matrix(vegdist(df_cluster_all, method = "jaccard",binary = T)))
+
+my_palette <- colorRampPalette(brewer.pal(n=7,name= "YlOrRd"))(100)
+pheatmap(jaccard_matrix, show_colnames = T, show_rownames = T,  main = "Jaccard similarity index - Beta chain", fontsize_number = 15, display_numbers=T, color = my_palette)
+
+
+# 2. MDS on Jaccard matrix
+mds <- jaccard_matrix %>%
+  dist() %>%
+  cmdscale() %>%
+  as_tibble()
+names(mds) <- c("MDS_1", "MDS_2")
+
+
+# ggscatter(mds, x = "MDS_1", y = "MDS_2", 
+#           label = rownames(jaccard_matrix),
+#           size = 1,
+#           repel = TRUE)
+
+clust <- kmeans(mds, 4)$cluster %>%
+  as.factor()
+mds <- mds %>%
+  mutate(groups = clust)
+# Plot and color by groups
+p <- ggscatter(mds, x = "MDS_1", y = "MDS_2", 
+          label = rownames(jaccard_matrix),
+          color = "groups",
+          palette = "uchicago",
+          size = 2, 
+          ellipse = TRUE,
+          ellipse.type = "convex",
+          repel = TRUE, 
+          title = paste("MDS on Jaccard matrix using clustered CDR3", chain), 
+          ggtheme = theme_bw())
+
+ggpar(p, legend = "None")
+```
+
+# Jaccard Similarity index between clusters 
+
+```{r complexeHeatmap jaccard index similarity}
+source("../Functions/similarity_functions.R")
+# Jaccard between clusters of 2 methods
+list_alignement_all <- list("Hamming_Distance" = list_alignement_HD, "Levenshtein_Distance" = list_alignement_LD, "TCRMatch" = list_alignement_tcrm,
+                            "iSMART"= list_alignement_ismart, "GIANA" = list_alignement_giana, "clusTCR"= list_alignement_clustcr,
+                            "GLIPH2" = list_alignement_gliph, "DeepTCR"= list_alignement_deeptcr, "TCRdist3"= list_alignement_tcrdist)
+
+#list_method_1 <- c("Hamming_Distance","Levenshtein_Distance", "TCRMatch", "iSMART", "GIANA", "clusTCR", "GLIPH2", "DeepTCR", "TCRdist")
+#list_method_2 <- c("Hamming_Distance", "Levenshtein_Distance", "TCRMatch", "iSMART", "GIANA", "clusTCR", "GLIPH2", "DeepTCR", "TCRdist")
+
+#example for 1 comparison HD vs LD
+list_method_1 <- c("Hamming_Distance")
+list_method_2 <- c("Levenshtein_Distance")
+
+my_palette <- colorRampPalette(brewer.pal(n=7,name= "YlOrRd"))(100)
+
+#heatmap of Jaccard matrices
+list_cluster_jaccard <- list()
+for(method_1 in list_method_1){
+  print(paste("method_1", method_1))
+  for(method_2 in list_method_2){
+    print(paste("method_2", method_2))
+    edge_cluster_jaccard <- perform_jaccard_cluster(list_alignement_all[[method_1]], list_alignement_all[[method_2]])
+    edge_cluster_jaccard <- edge_cluster_jaccard %>% filter(size_1 >3 & size_2 >3) #filter on big clusters only
+    edge_cluster_jaccard <- edge_cluster_jaccard %>% arrange(size_1, size_2)
+    
+    cluster_jaccard <- edge_cluster_jaccard %>% reshape2::dcast(factor(cluster_1, levels = unique(cluster_1)) ~ factor(cluster_2, levels = unique(cluster_2)), value.var = "jaccard_index") %>% remove_first_column()
+    list_cluster_jaccard[[paste(method_1, method_2, sep = "_")]] <- cluster_jaccard
+
+    ann_barplot_cluster_1 <- edge_cluster_jaccard %>% select(cluster_1, size_1) %>% arrange(., size_1) %>% unique()
+    rownames(ann_barplot_cluster_1) <- ann_barplot_cluster_1[,1]
+    ann_barplot_cluster_1 <- ann_barplot_cluster_1[,2]
+    
+    ann_barplot_cluster_2 <- edge_cluster_jaccard %>% select(cluster_2, size_2) %>% arrange(., size_2) %>% unique()
+    rownames(ann_barplot_cluster_2) <- ann_barplot_cluster_2[,1]
+    ann_barplot_cluster_2 <- ann_barplot_cluster_2[,2]
+    
+    cluster_jaccard <- as.matrix(cluster_jaccard)
+    #pdf(paste0(directory, "Plot/alpha_beta_bis/Jaccard_index/Jaccard_", method_1,"_", method_2,"_", chain,"_bigclusters.pdf"), width = 12, height = 10)
+    print(Heatmap(cluster_jaccard, name = "Jaccard similarity", column_title = paste(method_2, " clusters - chain", chain),
+    row_title = paste(method_1, " clusters"), cluster_rows = F, cluster_columns = F, show_row_names = F, show_column_names = F, col = my_palette,
+    right_annotation = rowAnnotation(size = anno_barplot(ann_barplot_cluster_1)), bottom_annotation = columnAnnotation(size=anno_barplot(ann_barplot_cluster_2))))
+    #dev.off()
+  }
+}
+
+```
+
+# Count the number of specificities in clusters for each method (not in paper)
+
+```{r count specificity by cluster, fig.dim=c(12,10)}
+# count_spe_by_cluster_HD <- count_spe_by_cluster_one_chain(output_HD) %>%  mutate(method = "Hamming_Distance") %>% as.data.frame()
+# count_spe_by_cluster_LD <- count_spe_by_cluster_one_chain(output_LD) %>% mutate(method = "Levenshtein_Distance")%>% as.data.frame()
+# count_spe_by_cluster_tcrm <- count_spe_by_cluster_one_chain(output_tcrm) %>% mutate(method = "TCRMatch") %>% as.data.frame()
+# count_spe_by_cluster_ismart <- count_spe_by_cluster_one_chain(output_ismart) %>% mutate(method = "iSMART")%>% as.data.frame()
+# count_spe_by_cluster_giana <- count_spe_by_cluster_one_chain(output_giana) %>% mutate(method = "GIANA")%>% as.data.frame()
+# 
+# count_spe_by_cluster_clustcr  <- count_spe_by_cluster_pairing(output_clustcr_pairing, "CDR3b_CDR3a") %>% mutate(method = "clusTCR") %>% as.data.frame()
+# count_spe_by_cluster_gliph  <- count_spe_by_cluster_pairing(output_gliph, "CDR3b_CDR3a") %>% mutate(method = "GLIPH2") %>% as.data.frame()
+# count_spe_by_cluster_deeptcr  <- count_spe_by_cluster_pairing(output_deeptcr, "CDR3b_CDR3a") %>% mutate(method = "DeepTCR") %>% as.data.frame()
+# count_spe_by_cluster_tcrdist <- count_spe_by_cluster_pairing(output_tcrdist, "CDR3b_CDR3a") %>% mutate(method = "TCRdist3")%>% as.data.frame()
+# 
+# list_count_spe_by_cluster <- list("Hamming_Distance"=count_spe_by_cluster_HD, "Levenshtein_Distance"=count_spe_by_cluster_LD , "TCRMatch"=count_spe_by_cluster_tcrm, "iSMART"=count_spe_by_cluster_ismart, "GIANA"=count_spe_by_cluster_giana, "clusTCR"=count_spe_by_cluster_clustcr, "GLIPH2"=count_spe_by_cluster_gliph, "DeepTCR"=count_spe_by_cluster_deeptcr, "TCRdist3"=count_spe_by_cluster_tcrdist)
+# 
+# 
+# list_plot <- list()
+# for(method in names(list_count_spe_by_cluster)){
+#   print(method)
+#   list_plot[[method]] <- ggplot(data = list_count_spe_by_cluster[[method]] , aes(x= nb_spe_cluster, y = perc_cluster))+
+#     geom_bar(stat="identity", fill = color_method[[method]])+
+#     theme_bw()+
+#     ylab("Percentage of clusters")+
+#     xlab("Number of specificities")+
+#     ggtitle(method)+
+#     ylim(0,100)
+# 
+# }
+# 
+# do.call("grid.arrange", c(list_plot, ncol = 3)) 
+
+#Refine the previous analysis by selecting one spe for polyspecific CDR3
+count_spe_by_cluster_HD <- select_one_spe_by_seq(output_HD) %>%  mutate(method = "Hamming_Distance") %>% as.data.frame()
+count_spe_by_cluster_LD <- select_one_spe_by_seq(output_LD) %>%  mutate(method = "Levenshtein_Distance") %>% as.data.frame()
+count_spe_by_cluster_tcrm <- select_one_spe_by_seq(output_tcrm) %>% mutate(method = "TCRMatch") %>% as.data.frame()
+count_spe_by_cluster_ismart <- select_one_spe_by_seq(output_ismart) %>% mutate(method = "iSMART")%>% as.data.frame()
+count_spe_by_cluster_giana <- select_one_spe_by_seq(output_giana) %>% mutate(method = "GIANA")%>% as.data.frame()
+
+count_spe_by_cluster_clustcr  <- select_one_spe_by_seq_bis(output_clustcr_pairing, "CDR3b_CDR3a") %>% mutate(method = "clusTCR") %>% as.data.frame()
+count_spe_by_cluster_gliph  <- select_one_spe_by_seq_bis(output_gliph, "CDR3b_CDR3a") %>% mutate(method = "GLIPH2") %>% as.data.frame()
+count_spe_by_cluster_deeptcr  <- select_one_spe_by_seq_bis(output_deeptcr, "CDR3b_CDR3a") %>% mutate(method = "DeepTCR") %>% as.data.frame()
+count_spe_by_cluster_tcrdist <- select_one_spe_by_seq_bis(output_tcrdist, "CDR3b_CDR3a") %>% mutate(method = "TCRdist")%>% as.data.frame()
+
+
+list_count_spe_by_cluster <- list("Hamming_Distance"=count_spe_by_cluster_HD, "Levenshtein_Distance"=count_spe_by_cluster_LD , "TCRMatch"=count_spe_by_cluster_tcrm, "iSMART"=count_spe_by_cluster_ismart, "GIANA"=count_spe_by_cluster_giana, "clusTCR"=count_spe_by_cluster_clustcr, "GLIPH2"=count_spe_by_cluster_gliph, "DeepTCR"=count_spe_by_cluster_deeptcr, "TCRdist3"=count_spe_by_cluster_tcrdist)
+
+
+list_plot <- list()
+for(method in names(list_count_spe_by_cluster)){
+  #print(method)
+  list_plot[[method]] <- ggplot(data = list_count_spe_by_cluster[[method]] , aes(x= nb_spe_cluster_new, y = perc_cluster))+
+    geom_bar(stat="identity", fill = color_method[[method]])+
+    theme_bw()+
+    ylab("Percentage of clusters")+
+    xlab("Number of specificities")+
+    ggtitle(method)+
+    ylim(0,100)+
+    theme(plot.title = element_text(hjust=0.5, face = "bold", size = 20),
+          text=element_text(size=15),
+        axis.text=element_text(size=15))
+}
+
+
+do.call("grid.arrange", c(list_plot, ncol = 3))
+
+```
+
+# selection of specific epitopes
+
+```{r selection of specific epitopes, fig.dim=c(8, 15)}
+count_epitope <- data_human %>% select(CDR3_alpha, CDR3_beta, Epitope) %>% unique()#CDR3_alpha, CDR3_beta
+count_epitope <- count_epitope %>% group_by(Epitope) %>% mutate(count = n())
+epitope_df <- count_epitope %>% select(Epitope, count) %>% unique()
+
+#plot number of TCR according epitopes
+epitope_df <- epitope_df %>% arrange(-count)
+epitope_df$Epitope <- factor(epitope_df$Epitope, level = epitope_df$Epitope)
+epitope_df_subset <- epitope_df %>% filter(count >=10)
+
+#Select the top 6 epitopes: c("GILGFVFTL", "NLVPMVATV", "GLCTLVAML", "FLCMKALLL", "NYNYLYRLF", "LLFGYPVYV")
+epitope_df_subset <- epitope_df_subset %>% as.data.frame()
+epitope_df_subset  <- epitope_df_subset %>% mutate(color_epi=ifelse(epitope_df_subset$Epitope=="GILGFVFTL","darkgoldenrod1",
+                                                                  ifelse(epitope_df_subset$Epitope=="NLVPMVATV","brown2",
+                                                                        ifelse(epitope_df_subset$Epitope=="GLCTLVAML", "pink",
+                                                                             ifelse(epitope_df_subset$Epitope=="FLCMKALLL", "cyan2",
+                                                                                  ifelse(epitope_df_subset$Epitope=="NYNYLYRLF", "darkorange",
+                                                                                     ifelse(epitope_df_subset$Epitope=="LLFGYPVYV","darkolivegreen4","grey50")))))))
+
+#pdf("../Plot/6EpitopeSelection.pdf", height = 12, width = 10)
+ggplot(data=epitope_df_subset, aes(x= reorder(Epitope, count), y=count)) +
+  geom_bar(stat="identity", aes(fill = color_epi))+
+  scale_fill_identity() +
+  geom_text(aes(label=count), hjust=-0.3, size=5)+
+  theme_classic()+
+  theme(plot.title = element_text(hjust= 0.5, size = 16),
+        text=element_text(size=20),
+        axis.text=element_text(size=15))+
+  ggtitle("Count of TCRs")+
+  ylab("Count")+
+  xlab("Epitope")+
+  ylim(0,max(epitope_df_subset$count)+10)+
+  coord_flip()
+#dev.off()
+
+```
+
+# Processing of output to add specificity
+
+```{r create specific output}
+output_HD_spe <- merge(output_HD, dataframe_alpha_beta[,c("CDR3", "Epitope", "chain")], by = "CDR3") %>% unique()
+output_HD_spe <- output_HD_spe %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_HD_spe <- output_HD_spe %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+#output_HD_spe <- output_HD_spe[output_HD_spe$size==output_HD_spe$nb_epi_cluster, ]#select pure clusters
+
+output_LD_spe <- merge(output_LD, dataframe_alpha_beta[,c("CDR3", "Epitope", "chain")], by = "CDR3") %>% unique()
+output_LD_spe <- output_LD_spe %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_LD_spe <- output_LD_spe %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+#output_LD_spe <- output_LD_spe[output_LD_spe$size==output_LD_spe$nb_epi_cluster, ]#select pure clusters
+
+output_tcrm_spe <- merge(output_tcrm, dataframe_alpha_beta[,c("CDR3", "Epitope", "chain")], by = "CDR3") %>% unique()
+output_tcrm_spe <- output_tcrm_spe %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_tcrm_spe <- output_tcrm_spe %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+#output_tcrm_spe <- output_tcrm_spe[output_tcrm_spe$size==output_tcrm_spe$nb_epi_cluster, ]#select pure clusters
+
+output_ismart_spe <- merge(output_ismart, dataframe_alpha_beta[,c("CDR3", "Epitope", "chain")], by = "CDR3") %>% unique()
+output_ismart_spe <- output_ismart_spe %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_ismart_spe <- output_ismart_spe %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+#output_ismart_spe <- output_ismart_spe[output_ismart_spe$size==output_ismart_spe$nb_epi_cluster, ]#select pure clusters
+
+output_giana_spe <- merge(output_giana, dataframe_alpha_beta[,c("CDR3", "Epitope", "chain")], by = "CDR3") %>% unique()
+output_giana_spe <- output_giana_spe %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_giana_spe <- output_giana_spe %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+#output_giana_spe <- output_giana_spe[output_giana_spe$size==output_giana_spe$nb_epi_cluster, ]#select pure clusters
+
+#pairing method
+output_clustcr_alpha <- output_clustcr_pairing %>% select(CDR3a, clusters, size) %>% rename("CDR3" = "CDR3a") %>% mutate(chain = "alpha")
+output_clustcr_alpha$clusters <- paste(output_clustcr_alpha$clusters, "a", sep ="")#rename clusters alpha
+output_clustcr_beta <- output_clustcr_pairing %>% select(CDR3b, clusters, size) %>% rename("CDR3" = "CDR3b") %>% mutate(chain = "beta")
+output_clustcr_beta$clusters <- paste(output_clustcr_beta$clusters, "b", sep ="")#rename clusters beta
+output_clustcr_spe <- rbind(output_clustcr_alpha, output_clustcr_beta) %>% merge(., dataframe_alpha_beta[,c("CDR3", "Epitope")], by = "CDR3") %>% unique() %>%  group_by(clusters) %>% mutate(size = n())
+output_clustcr_spe <- output_clustcr_spe %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_clustcr_spe <- output_clustcr_spe %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+output_clustcr_spe <- output_clustcr_spe %>% filter(size != 1)
+#output_clustcr_spe <- output_clustcr_spe[output_clustcr_spe$size==output_clustcr_spe$nb_epi_cluster, ]#select pure clusters
+
+output_gliph_alpha <- output_gliph %>% select(CDR3a, clusters, size) %>% rename("CDR3" = "CDR3a") %>% mutate(chain = "alpha")
+output_gliph_alpha$clusters <- paste(output_gliph_alpha$clusters, "a", sep ="")#rename clusters alpha
+output_gliph_beta <- output_gliph %>% select(CDR3b, clusters, size) %>% rename("CDR3" = "CDR3b") %>% mutate(chain = "beta")
+output_gliph_beta$clusters <- paste(output_gliph_beta$clusters, "b", sep ="")#rename clusters beta
+output_gliph_spe <- rbind(output_gliph_alpha, output_gliph_beta) %>% merge(., dataframe_alpha_beta[,c("CDR3", "Epitope")], by = "CDR3") %>% unique() %>% group_by(clusters) %>% mutate(size = n())
+output_gliph_spe <- output_gliph_spe %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_gliph_spe <- output_gliph_spe %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+output_gliph_spe <- output_gliph_spe %>% filter(size != 1)
+#output_gliph_spe <- output_gliph_spe[output_gliph_spe$size==output_gliph_spe$nb_epi_cluster, ]#select pure clusters
+
+output_deeptcr_alpha <- output_deeptcr %>% select(CDR3a, clusters) %>% rename("CDR3" = "CDR3a") %>% mutate(chain = "alpha")
+output_deeptcr_alpha$clusters <- paste(output_deeptcr_alpha$clusters, "a", sep ="")#rename clusters alpha
+output_deeptcr_beta <- output_deeptcr %>% select(CDR3b, clusters) %>% rename("CDR3" = "CDR3b") %>% mutate(chain = "beta")
+output_deeptcr_beta$clusters <- paste(output_deeptcr_beta$clusters, "b", sep ="")#rename clusters beta
+output_deeptcr_spe <- rbind(output_deeptcr_alpha, output_deeptcr_beta) %>% merge(., dataframe_alpha_beta[,c("CDR3", "Epitope")], by = "CDR3") %>% unique() %>% group_by(clusters) %>% mutate(size = n())
+output_deeptcr_spe <- output_deeptcr_spe %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_deeptcr_spe <- output_deeptcr_spe %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+output_deeptcr_spe <- output_deeptcr_spe %>% filter(size != 1)
+#output_deeptcr_spe <- output_deeptcr_spe[output_deeptcr_spe$size==output_deeptcr_spe$nb_epi_cluster, ]#select pure clusters
+
+output_tcrdist_alpha <- output_tcrdist %>% select(CDR3a, clusters) %>% rename("CDR3" = "CDR3a") %>% mutate(chain = "alpha")
+output_tcrdist_alpha$clusters <- paste(output_tcrdist_alpha$clusters, "a", sep ="")#rename clusters alpha
+output_tcrdist_beta <- output_tcrdist %>% select(CDR3b, clusters) %>% rename("CDR3" = "CDR3b") %>% mutate(chain = "beta")
+output_tcrdist_beta$clusters <- paste(output_tcrdist_beta$clusters, "b", sep ="")#rename clusters beta
+output_tcrdist_spe <- rbind(output_tcrdist_alpha, output_tcrdist_beta) %>% merge(., dataframe_alpha_beta[,c("CDR3", "Epitope")], by = "CDR3") %>% unique() %>% group_by(clusters) %>% mutate(size = n())
+output_tcrdist_spe <- output_tcrdist_spe %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_tcrdist_spe <- output_tcrdist_spe %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+output_tcrdist_spe <- output_tcrdist_spe %>% filter(size != 1)
+#output_tcrdist_spe <- output_tcrdist_spe[output_tcrdist_spe$size==output_tcrdist_spe$nb_epi_cluster, ]#select pure clusters
+
+
+list_output_spe <- list("Hamming_Distance" = output_HD_spe, "Levenshtein_Distance"=output_LD_spe, "TCRMatch"= output_tcrm_spe, "GIANA"= output_giana_spe, "iSMART" = output_ismart_spe, "clusTCR" = output_clustcr_spe, "GLIPH2" = output_gliph_spe,"DeepTCR" = output_deeptcr_spe, "TCRdist3" = output_tcrdist_spe)
+
+```
+
+# How many epitope-specific sequences are clustered by methods ?
+
+```{r How many sequences/pairs are clustered by methods }
+output_clustcr_spe_bis <- output_clustcr_pairing %>% merge(., data_human[,c("CDR3b_CDR3a", "Epitope")], by.x = "CDR3b_CDR3a", by.y="CDR3b_CDR3a") %>% unique()
+colnames(output_clustcr_spe_bis)[1] <- "CDR3b_CDR3a"
+
+output_gliph_spe_bis <- output_gliph %>% merge(., data_human[,c("CDR3b_CDR3a", "Epitope")], by="CDR3b_CDR3a") %>% unique()
+
+output_deeptcr_spe_bis <- output_deeptcr %>% merge(., data_human[,c("CDR3b_CDR3a", "Epitope")], by="CDR3b_CDR3a") %>% unique()
+
+output_tcrdist_spe_bis <- output_tcrdist %>% merge(., data_human[,c("CDR3b_CDR3a", "Epitope")], by="CDR3b_CDR3a") %>% unique() 
+
+
+list_output_spe_bis <- list("Hamming_Distance" = output_HD_spe, "Levenshtein_Distance"=output_LD_spe, "TCRMatch"= output_tcrm_spe, "GIANA"= output_giana_spe, "iSMART" = output_ismart_spe, "clusTCR" = output_clustcr_spe_bis, "GLIPH2" = output_gliph_spe_bis,"DeepTCR" = output_deeptcr_spe_bis, "TCRdist3" = output_tcrdist_spe_bis)
+
+
+count_spe_method <- data.frame(epitope = c("GILGFVFTL", "NLVPMVATV", "GLCTLVAML", "FLCMKALLL", "NYNYLYRLF", "LLFGYPVYV"),
+                               total_alpha= c(484, 325,145,134,55,4),
+                               total_beta=c(456,349,170,136,46,7),
+                               total_pair = c(706,397,215,136,56,10))
+count_spe_method <- count_spe_method %>% mutate(total_alpha_plus_beta = total_alpha + total_beta)
+
+count_spe_method_epi <- data.frame()
+for(method in list_method){
+  #print(method)
+  big_df <- data.frame()
+  epitope_list <- list()
+  for(epi in list_epitope){
+    #print(epi)
+    test <- list_output_spe_bis[[method]] %>% filter(Epitope == epi)
+    if(method %in% c("Hamming_Distance","Levenshtein_Distance","TCRMatch","iSMART","GIANA")){
+      nb_cdr3 <- n_distinct(test$CDR3)
+      df <- data.frame(methods = method, epitope = epi, nb_clustered = nb_cdr3, perc_clustered = nb_cdr3/count_spe_method$total_alpha_plus_beta[count_spe_method$epitope == epi]*100)
+    }
+    else{
+      nb_cdr3 <- n_distinct(test$CDR3b_CDR3a)
+      df <- data.frame(methods = method, epitope = epi, nb_clustered = nb_cdr3, perc_clustered = nb_cdr3/count_spe_method$total_pair[count_spe_method$epitope == epi]*100)
+    }
+    
+    count_spe_method_epi <- rbind(count_spe_method_epi , df)
+  }
+}
+
+count_spe_method_epi$methods <- factor(count_spe_method_epi$methods, level = list_method)
+count_spe_method_epi$epitope <- factor(count_spe_method_epi$epitope, level = list_epitope)
+
+# ggplot(data = count_spe_method_epi, aes(x= methods, y = perc_clustered, fill = epitope))+
+#   geom_bar(stat="identity", position=position_dodge())+
+#   theme_bw()+
+#   scale_fill_manual(values =c("darkgoldenrod1", "brown2", "pink", "cyan2", "darkorange", "darkolivegreen4"))+
+#   ylab("Percentage of clustered seq/pair")+
+#   xlab("Methods")+
+#   theme(legend.position = "bottom")
+
+
+list_plot <- list()
+for(epi in list_epitope){
+  df <- count_spe_method_epi %>% filter(epitope ==epi)
+  df$methods <- factor(df$methods, levels = list_method)
+  
+  list_plot[[epi]] <- ggplot(data = df, aes(x= methods, y = perc_clustered, fill = methods))+
+    geom_bar(stat="identity", position=position_dodge())+
+    theme_bw()+
+    scale_fill_manual(values = color_method)+
+    ylab("Percentage of clustered seq/pair (%)")+
+    xlab("Methods")+
+    theme(legend.position = "none",
+          #axis.title.x = element_blank(),axis.text.x = element_blank())+
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          plot.title = element_text(hjust=0.5, face = "bold", size =20),
+          text=element_text(size=15),
+        axis.text=element_text(size=13))+
+    ggtitle(epi)+xlab("")
+}
+#do.call("grid.arrange", c(list_plot, ncol = 3))
+#pdf("../Plot/PercClusteredSeq_GIL.pdf", height= 6, width = 7)
+grid.arrange(list_plot[["GILGFVFTL"]])
+#dev.off()
+#grid.arrange(list_plot[["FLCMKALLL"]])
+```
+
+# Selection of specific clusters
+
+```{r specific clusters of random 6 epitopes}
+list_epitope <- c("GILGFVFTL", "NLVPMVATV", "GLCTLVAML", "FLCMKALLL", "NYNYLYRLF", "LLFGYPVYV")
+
+#1. with at least 1 specificity
+at_least_one_epi <- data.frame()
+at_least_one_epi_clusters <-list()
+for(method in list_method){
+  #print(method)
+  big_df <- data.frame()
+  epitope_list <- list()
+  for(epi in list_epitope){
+    #print(epi)
+    test <- list_output_spe[[method]] %>% filter(Epitope == epi)#Attention: que sequence spe de GIL (pas les autres du cluster)
+    list_clusters <- unique(test$clusters)#retrieve the list of clusters
+      
+    cluster_spe <- list_output_spe[[method]] %>% filter(clusters %in%list_clusters)
+    
+    #cluster_spe <- cluster_spe %>% filter(Epitope != epi) %>% unique()#remove specific CDR3 but for poly CDR3, remove only the row with the specificity not the other one
+    #list_CDR3_to_remove <- cluster_spe$CDR3[cluster_spe$Epitope == epi]
+    #cluster_spe <- cluster_spe %>% filter(CDR3 %!in% list_CDR3_to_remove)#remove all CDR3 which are specific to the epi
+               
+    #cluster_spe <- cluster_spe %>% group_by(clusters) %>% mutate(size = n_distinct(CDR3))#resize clusters
+    
+    epitope_list[[epi]] <- cluster_spe %>% mutate(Epitope_cluster = epi)
+    percentage_clusters <- n_distinct(test$clusters)/n_distinct(list_output_spe[[method]]$clusters)
+    df <- data.frame(method = method, epitope = epi, perc_clusters = percentage_clusters*100) 
+    big_df <- rbind(big_df, df)
+  }
+  at_least_one_epi <- rbind(at_least_one_epi, big_df)
+  at_least_one_epi_clusters[[method]] <- epitope_list
+}
+
+
+at_least_one_epi$method <- factor(at_least_one_epi$method, level = list_method)
+at_least_one_epi$epitope <- factor(at_least_one_epi$epitope, level = list_epitope)
+
+# ggplot(data = at_least_one_epi , aes(x= method, y = perc_clusters, fill = epitope))+
+#   geom_bar(stat="identity", position=position_dodge())+
+#   theme_bw()+
+#   scale_fill_manual(values =c("darkgoldenrod1", "brown2", "pink", "cyan2", "darkorange", "darkolivegreen4"))+
+#   ylab("Percentage of clusters")+
+#   xlab("Methods")+
+#   theme(legend.position = "bottom")+
+#   ylim(0,50)
+
+
+# list_plot <- list()
+# for(epi in list_epitope){
+#   df <- at_least_one_epi %>% filter(epitope ==epi)
+#   list_plot[[epi]] <- ggplot(data = df, aes(x= method, y = perc_clusters, fill = method))+
+#     geom_bar(stat="identity", position=position_dodge())+
+#     theme_bw()+
+#     scale_fill_manual(values = color_method)+
+#     ylab("Percentage of clusters")+
+#     xlab("Methods")+
+#     theme(legend.position = "none",
+#           axis.title.x = element_blank(),axis.text.x = element_blank())+
+#     ggtitle(epi)+ylim(0,50)
+# }
+# do.call("grid.arrange", c(list_plot, ncol = 3)) 
+
+
+# for(method in names(at_least_one_epi_clusters)){
+#     print(method)
+#     df_all_epi <- bind_rows(at_least_one_epi_clusters[[method]])
+#     df_all_epi_2 <- df_all_epi %>% select(-c(CDR3, nb_epi_cluster, Epitope, epi_majoritaire)) %>% unique()
+#     df_all_epi_2 <- df_all_epi_2 %>% mutate(interval_size = ifelse(size<4, "[2,3]", 
+#                                                      ifelse(size >3 & size<11, "[4-10]",
+#                                                           ifelse(size>10 & size<51, "[11-50]",
+#                                                                  ifelse(size>50 & size <101, "[50,100]",
+#                                                                         ifelse(size>100, ">100", NA))))))
+#     
+#     df_all_epi_2 <- df_all_epi_2 %>% group_by(interval_size, Epitope_cluster) %>% mutate(count_cluster = n()) 
+#     df_all_epi_2 <- df_all_epi_2 %>% group_by(interval_size) %>% mutate(count_cluster_in_interval = n()) 
+#     df_all_epi_2 <- df_all_epi_2 %>% mutate(perc_spe_per_inter_size = count_cluster/count_cluster_in_interval*100)
+#     df_all_epi_3 <- df_all_epi_2 %>% select(Epitope_cluster, interval_size, count_cluster, perc_spe_per_inter_size, count_cluster_in_interval) %>% unique() %>% mutate(method = method)
+#     
+#     df_all_epi_3$interval_size <- factor(df_all_epi_3$interval_size, level = c("[2,3]", "[4-10]", "[11-50]",  "[50,100]", ">100"))
+#     df_all_epi_3$Epitope_cluster <- factor(df_all_epi_3$Epitope_cluster, level = c("GILGFVFTL", "NLVPMVATV", "GLCTLVAML", "FLCMKALLL", "NYNYLYRLF", "LLFGYPVYV"))
+#     
+#     
+#     #pdf(paste0(directory, "Plot/alpha_beta_bis/perc_clusters_one_perc_by_size_", method, "_bis.pdf"), width = 10, height = 6)
+#     print(ggplot(data = df_all_epi_3, aes(x=interval_size, y = perc_spe_per_inter_size, fill = Epitope_cluster))+
+#     geom_bar(stat="identity", alpha = 1)+
+#     scale_fill_manual(values = c("darkgoldenrod1", "brown2", "pink", "cyan2", "darkorange", "darkolivegreen4"))+
+#     geom_text(data = df_all_epi_3, aes(x = interval_size, y = 105, label = count_cluster_in_interval), size = 5)+
+#     theme_classic()+
+#     ggtitle(paste0("Specific clusters (at least 1 ) of ", method)))
+#     #dev.off()
+# }
+
+
+# Refine clusters with at least one spe by selecting one spe by sequence
+at_least_one_epi_clusters_bis <- list()
+for(method in names(at_least_one_epi_clusters)){
+  #print(method)
+  at_least_one_epitope <- list()
+  for(epi in list_epitope){
+    output_spe_test <- split(at_least_one_epi_clusters[[method]][[epi]], at_least_one_epi_clusters[[method]][[epi]]$clusters)
+    output_spe_new <- list()
+    for(cluster in names(output_spe_test)){
+      output_spe_seq <- split(output_spe_test[[cluster]], output_spe_test[[cluster]]$CDR3)
+      row_toKeep_list <- list()
+      for(i in names(output_spe_seq)){
+        #print(i)
+        if(nrow(output_spe_seq[[i]])>1){#if multiple specificities
+          if(output_spe_seq[[i]]$Epitope==output_spe_seq[[i]]$epi_majoritaire[1]){
+            row_toKeep_df <- output_spe_seq[[i]] %>% filter(Epitope == output_spe_seq[[i]]$epi_majoritaire[1])#keep specific epitope
+          }else{row_toKeep_df <- output_spe_seq[[i]][1,]}#otherwise keep the first row
+          
+        }else{row_toKeep_df <- output_spe_seq[[i]][1,]}#otherwise keep the first row
+        
+        row_toKeep_list[[i]] <- row_toKeep_df 
+      }
+      
+      output_spe_keep <- rbindlist(row_toKeep_list) %>% unique() %>% drop_na() %>% as.data.frame()
+      output_spe_new[[cluster]] <- output_spe_keep
+    }
+    
+    output_spe_bis <- rbindlist(output_spe_new)
+    
+    at_least_one_epitope[[epi]] <- output_spe_bis
+  }
+  
+  at_least_one_epi_clusters_bis[[method]] <- at_least_one_epitope
+}
+
+```
+
+# Look at the other specificities in specific clusters
+
+```{r other specificities in spe clusters, fig.dim=c(15,10)}
+epi <- "GILGFVFTL"
+df_organism_color <- data.frame(Antigen_organism = c("SARS-CoV2","Cytomegalovirus (CMV)","Epstein Barr virus (EBV)", "Influenza A virus", "Mycobacterium tuberculosis" ,
+                            "Yellow fever virus (YFV)","Homo sapiens (human)","SARS-CoV1","Hepatitis B virus (HBV)","SARS coronavirus Tor2","Tumor associated antigen (TAA)"),
+                            color = c("#FFFF99","#7FC97F","#BEAED4", "#FDC086","#F0027F","#386CB0","#666666","darkcyan", "#BF5B17", "aquamarine2","grey"))
+df_organism <- merge(df_organism_color, epitope_organism[,c("Antigen_organism")], by = "Antigen_organism", all = T) %>% unique()
+df_organism$color[is.na(df_organism$color)] <- "black"
+df_organism$Antigen_organism[df_organism$Antigen_organism=="Influenza A virus (A/chicken/Anhui/1/1998(H9N2)) (Influenza A virus (A/Chicken/Anhui/1/98(H9N2)))"]<- "Influenza A virus (chicken)"
+
+df_all <- list()
+list_plot <- list()
+df_count_spe <- data.frame()
+for(method in names(at_least_one_epi_clusters_bis)){
+  #print(method)
+  df <- at_least_one_epi_clusters_bis[[method]][[epi]] 
+  
+  if(nrow(df)!=0){
+  df <- df %>% select(CDR3, Epitope) %>% group_by(Epitope) %>% mutate(count = n())%>% mutate(method = method)
+  df <- df %>% select(Epitope, count, method) %>% unique()
+  
+  df_spe <- data.frame(epitope = epi, method = method, n_distinct_spe = n_distinct(df$Epitope))
+  df_count_spe <- rbind(df_count_spe, df_spe)
+  
+  df <- df[order(df$count, decreasing = T),]
+  if(nrow(df)>10){  df <- df[1:10,]}#show uniqly the 10 first rows
+  
+  df <- merge(df, epitope_organism, by ="Epitope") %>% unique()
+  df <- merge(df, df_organism, by = "Antigen_organism")
+  df_color <- df %>% select(Antigen_organism, color) %>% unique()
+  #df_color$Antigen_organism[is.na(df_color$Antigen_organism)] <- "grey"
+  
+  df_all[[method]] <- df
+  
+  nb_max <- max(df_all[[method]]$count)
+
+  if(nb_max >1000){th <- 200}else if(nb_max >100){th <- 30} else{th <- 1}
+  
+  list_plot[[method]] <- ggplot(data=df_all[[method]], aes(x= reorder(Epitope, count), y=count, fill = Antigen_organism)) +
+  geom_bar(stat="identity")+
+  #scale_fill_identity() +
+  scale_fill_manual(values = df_color$color)+
+  geom_text(aes(label=count), hjust=-0.3, size=4)+
+  theme_classic()+
+  theme(plot.title = element_text(hjust= 0.5, size = 20, face ="bold"),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm"),
+        #legend.position="right")+
+        legend.position = c(1, 0.05),
+        legend.justification = c("right", "bottom"),
+        legend.box.just = "right",
+        legend.margin = margin(0.5, 0.5, 0.5, 0.5),
+        legend.key.size = unit(0.3, 'cm'), #change legend key size
+        legend.key.height = unit(0.3, 'cm'), #change legend key height
+        legend.key.width = unit(0.3, 'cm'),
+        text=element_text(size=15),
+        axis.text=element_text(size=13),
+        legend.text=element_text(size=10),
+        legend.title=element_text(size=10))+
+  ggtitle(method)+
+  ylab("Count")+
+  xlab("Epitope")+
+  ylim(0, max(df_all[[method]]$count)+th)+
+  #annotate("text", x=6, y=max(df_all[[method]]$count), label= n_distinct(df_all[[method]]$Epitope))+
+  coord_flip()#7x9
+  }
+}
+#pdf("../Plot/AllSpecificitiesInSpeClusters_GIL.pdf", height = 10, width= 15)
+do.call("grid.arrange", c(list_plot, ncol = 3))
+#dev.off()
+
+```
+
+# Look at in how many clusters selected CDR3s are clustered
+
+```{r number of clusters for selected epitope}
+#for selected CDR3, In how many clusters are CDR3 clustered ? 
+plot_list <- list()
+for(epi in list_epitope){
+  df_count_clusters <- data.frame()
+  for(method in names(at_least_one_epi_clusters)){
+    #print(method)
+    df <- at_least_one_epi_clusters[[method]][[epi]] %>% filter(Epitope == epi) %>% select(CDR3, clusters)%>% mutate(method = method) %>% unique()
+    
+    df_cluster <- data.frame(epitope = epi, method = method, n_distinct_clusters = n_distinct(df$clusters))
+    df_count_clusters <- rbind(df_count_clusters, df_cluster)
+  }
+  df_count_clusters$epitope <- factor(df_count_clusters$epitope, level = list_epitope)
+  df_count_clusters$method <- factor(df_count_clusters$method, level = list_method)
+  
+  plot_list[[epi]] <- ggplot(data= df_count_clusters, aes(x=method, y=n_distinct_clusters, fill = method))+
+                  geom_bar(stat="identity")+
+                  scale_fill_manual(values = color_method)+
+                  theme_bw()+
+                  ggtitle(epi)+
+                  ylab("cluster count")+
+                  xlab(" ")+
+                  theme(legend.position ="none",
+                        axis.text.x = element_blank())
+}
+#do.call("grid.arrange", c(plot_list, ncol = 3)) 
+
+#add the notion of cluster size
+cluster_total_list <- c("Hamming_Distance"=548, "Levenshtein_Distance"=494, "TCRMatch"=285, "iSMART"=465,"GIANA"=593, "clusTCR"=111*2,"GLIPH2"=380*2, "DeepTCR"=1628*2, "TCRdist3"=669*2)
+
+plot_list <- list()
+for(epi in list_epitope){
+  df_count_clusters <- data.frame()
+  for(method in names(at_least_one_epi_clusters)){
+    #print(method)
+    df <- at_least_one_epi_clusters[[method]][[epi]] %>% filter(Epitope == epi) %>% select(clusters, size)%>% mutate(method = method) %>% unique()#with spe CDR3
+    if(nrow(df)!=0){
+    
+    df_cluster <- df %>% mutate(interval_size = ifelse(size<4, "[2-3]", 
+                                                     ifelse(size >3 & size<11, "[4-10]",
+                                                          ifelse(size>10 & size<51, "[11-50]",
+                                                                 ifelse(size>50 & size <101, "[50-100]",
+                                                                        ifelse(size>100, ">100", NA))))))
+    df_cluster <- df_cluster %>% group_by(interval_size) %>% mutate(count = n(), epitope = epi)
+    #with percentage of clusters instead of count
+    nb <- cluster_total_list[[method]]
+    #df_cluster <- df_cluster %>% mutate(nb_total_cluster = nb) #for percentage in the total count of clusters by method
+    df_cluster <- df_cluster %>% mutate(nb_total_cluster = n_distinct(df_cluster$clusters)) #for percentage in the count of specific clusters
+    df_cluster <- df_cluster %>% mutate(perc_cluster = count/nb_total_cluster*100)
+    #
+    df_cluster <- df_cluster %>% select(-c(clusters, size)) %>% unique()
+      
+    df_count_clusters <- rbind(df_count_clusters, df_cluster)
+    }
+  }
+  df_count_clusters$epitope <- factor(df_count_clusters$epitope, level = list_epitope)
+  df_count_clusters$method <- factor(df_count_clusters$method, level = list_method)
+  df_count_clusters$interval_size <- factor(df_count_clusters$interval_size, levels= rev(c("[2-3]", "[4-10]", "[11-50]", "[50-100]",">100")))
+  
+  plot_list[[epi]] <- ggplot(data = df_count_clusters, aes(x=method, y = perc_cluster, fill = interval_size))+#y=count
+  geom_bar(stat="identity")+
+  scale_fill_grey(start=0.8, end=0.2) +
+  theme_bw()+
+    ggtitle(epi)+
+    ylab("Percentage of clusters (%)")+
+    xlab(" ")+
+    theme(legend.position ="right",
+          #axis.text.x = element_blank())+
+          axis.text.x = element_text(hjust=1, angle = 45),
+          plot.title = element_text(hjust=0.5, face = "bold", size = 20),
+          text=element_text(size=15),
+        axis.text=element_text(size=13))+
+    ylim(0,100)
+
+}
+
+#do.call("grid.arrange", c(plot_list, ncol = 3))
+#pdf("../Plot/PercClusters_GIL.pdf", height = 6, width = 8)
+grid.arrange(plot_list[["GILGFVFTL"]])
+#dev.off()
+#grid.arrange(plot_list[["FLCMKALLL"]])
+```
+
+# Number of specificities in specific clusters
+
+```{r Number of specificities in specific clusters, fig.dim=c(12,10)}
+#Number of specificities in specific clusters by selecting one spe for multispe CDR3
+nb_spe_cluster_spe_method <-list()
+for(method in list_method){
+  #print(method)
+  nb_spe_cluster_spe <- list()
+  for(epi in list_epitope){
+    #print(epi)
+    if(nrow(at_least_one_epi_clusters_bis[[method]][[epi]] != 0)){
+      at_least_one_epi_clusters_bis[[method]][[epi]] <- at_least_one_epi_clusters_bis[[method]][[epi]] %>% group_by(clusters) %>% mutate(nb_spe_cluster = n_distinct(Epitope))
+      cluster_spe <- at_least_one_epi_clusters_bis[[method]][[epi]] %>% select(clusters, Epitope, nb_spe_cluster) %>% unique()
+      cluster_spe <- cluster_spe %>% select(-Epitope) %>% unique()
+      
+      df_sum <- cluster_spe %>% group_by(nb_spe_cluster) %>% summarise(count_cluster = n(), .groups = 'drop')
+      cluster_total <- sum(df_sum$count_cluster)
+      df_sum <- df_sum %>% mutate(perc_cluster = count_cluster/cluster_total*100)
+      
+      df_sum <- df_sum %>% mutate(methods = method, epitope_spe = epi, cluster_tot=cluster_total)
+      
+      nb_spe_cluster_spe[[epi]] <- df_sum
+    }
+  }
+  nb_spe_cluster_spe_method[[method]] <- nb_spe_cluster_spe
+}
+
+list_color_epitope <- c("darkgoldenrod1", "brown2", "pink", "cyan2", "darkorange", "darkolivegreen4")
+epi <- "GILGFVFTL"
+n <- 1
+list_plot <- list()
+for(method in list_method){
+  df <- nb_spe_cluster_spe_method[[method]][[epi]]
+  if(exists("df")&&is.data.frame(get("df"))==TRUE){
+  
+  list_plot[[method]] <- ggplot(data = df, aes(x= nb_spe_cluster, y = perc_cluster, fill = epitope_spe))+
+        geom_bar(stat="identity")+
+        theme_bw()+
+        ylab("Percentage of clusters")+
+        xlab("Number of specificities")+
+        scale_fill_manual(values = list_color_epitope[[n]])+
+        ggtitle(method)+
+        ylim(0,100)+
+      theme(strip.background =element_rect(fill="grey"),legend.position="none", 
+            plot.title = element_text(hjust = 0.5, face = "bold", size = 20),
+            text=element_text(size=15),
+        axis.text=element_text(size=15))
+  }
+}
+#pdf("../Plot/NumberSpecificities_GIL.pdf", height = 10, width = 15)
+do.call("grid.arrange", c(list_plot, ncol = 3))
+#dev.off()
+```
+
+# Selection of very specific clusters and calculation of sensibility
+
+```{r selection of specific clusters - major epitope and x times more - sensibility}
+output_clustcr_spe_ter <- output_clustcr_spe_bis %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_clustcr_spe_ter <- output_clustcr_spe_ter %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+
+output_gliph_spe_ter <- output_gliph_spe_bis %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_gliph_spe_ter <- output_gliph_spe_ter %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+
+output_deeptcr_spe_ter <- output_deeptcr_spe_bis %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_deeptcr_spe_ter <- output_deeptcr_spe_ter %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+
+output_tcrdist_spe_ter <- output_tcrdist_spe_bis %>% group_by(clusters, Epitope) %>% mutate(nb_epi_cluster = n())
+output_tcrdist_spe_ter <- output_tcrdist_spe_ter %>% group_by(clusters)  %>% mutate(epi_majoritaire = Epitope[which.max(nb_epi_cluster)])
+
+list_output_spe_ter <- list("Hamming_Distance" = output_HD_spe, "Levenshtein_Distance"=output_LD_spe, "TCRMatch"= output_tcrm_spe, "GIANA"= output_giana_spe, "iSMART" = output_ismart_spe, "clusTCR" = output_clustcr_spe_ter, "GLIPH2" = output_gliph_spe_ter,"DeepTCR" = output_deeptcr_spe_ter, "TCRdist3" = output_tcrdist_spe_ter)
+
+#1. select clusters spe
+major_times_epi_clusters <-list()
+for(method in list_method){
+  #print(method)
+  big_df <- data.frame()
+  epitope_list <- list()
+  for(epi in list_epitope){
+    #print(epi)
+    list_output_spe_ter[[method]] <- list_output_spe_ter[[method]] %>% mutate(perc_epi_in_cluster = nb_epi_cluster/size)
+    test <- list_output_spe_ter[[method]] %>% filter(epi_majoritaire == epi & size >3 & perc_epi_in_cluster >=0.67)#select clusters with epi as major and bigcluster
+    list_clusters <- unique(test$clusters)#retrieve the list of clusters
+      
+    cluster_spe <- list_output_spe_ter[[method]] %>% filter(clusters %in% list_clusters)
+    if(method =="GLIPH2"){cluster_spe  <- cluster_spe %>% filter(` number_unique_cdr3`>3)}
+    cluster_spe$CDR3b_CDR3a_clusters <- paste(cluster_spe$CDR3b_CDR3a, cluster_spe$clusters, sep = "_")
+    
+    epitope_list[[epi]] <- cluster_spe %>% mutate(major_xtimes_epi = epi)
+
+  }
+
+  major_times_epi_clusters[[method]] <- epitope_list
+}
+
+#2. calculation of the sensibility
+df_nb_spe <- data.frame(epitope = list_epitope,
+                       nb_CDR3 =c(sum(matrix_alpha_beta_final$GILGFVFTL), sum(matrix_alpha_beta_final$NLVPMVATV), sum(matrix_alpha_beta_final$GLCTLVAML), 
+                                  sum(matrix_alpha_beta_final$FLCMKALLL), sum(matrix_alpha_beta_final$NYNYLYRLF), sum(matrix_alpha_beta_final$LLFGYPVYV)),
+                       nb_pair =c(sum(matrix_pair_final$GILGFVFTL), sum(matrix_pair_final$NLVPMVATV), sum(matrix_pair_final$GLCTLVAML), 
+                                  sum(matrix_pair_final$FLCMKALLL), sum(matrix_pair_final$NYNYLYRLF), sum(matrix_pair_final$LLFGYPVYV)))
+
+df_sensibility_all_epitope <- data.frame()
+for (epi in list_epitope){
+  df_sensibility_all <- data.frame()
+  for(method in list_method){
+    if(method %in% c("Hamming_Distance", "Levenshtein_Distance", "TCRMatch","iSMART", "GIANA")){
+      nb_CDR3 <- n_distinct(major_times_epi_clusters[[method]][[epi]]$CDR3[major_times_epi_clusters[[method]][[epi]]$Epitope==epi])
+      score <- nb_CDR3/df_nb_spe$nb_CDR3[df_nb_spe$epitope==epi]
+    }else{
+      nb_pair <- n_distinct(major_times_epi_clusters[[method]][[epi]]$CDR3b_CDR3a[major_times_epi_clusters[[method]][[epi]]$Epitope==epi])
+      score <- nb_pair/df_nb_spe$nb_pair[df_nb_spe$epitope==epi]
+    }
+      df_sensibility <- data.frame(method = method, epitope = epi, sensibility = score)
+      df_sensibility_all <- rbind(df_sensibility_all, df_sensibility)
+  }
+  df_sensibility_all_epitope <- rbind(df_sensibility_all_epitope, df_sensibility_all)
+}
+
+#by epitope
+df_sensibility_all_epitope$method <- factor(df_sensibility_all_epitope$method, levels = list_method)
+df_sensibility_all_epitope$epitope <- factor(df_sensibility_all_epitope$epitope, levels = list_epitope)
+
+# ggplot(df_sensibility_all_epitope, aes(x=method, y=sensibility, color = method)) +
+#   geom_segment(aes(xend=method, yend=0)) +
+#   geom_point(size=4) +
+#   scale_color_manual(values = color_method)+
+#   theme_bw() +
+#   xlab("")+
+#   theme(axis.text.x =  element_blank())+
+#   facet_wrap(~epitope)
+
+#for GIL epitope only
+#pdf("../Plot/Sensibility_GIL.pdf", height=6, width=7)
+ggplot(df_sensibility_all_epitope[df_sensibility_all_epitope$epitope == "GILGFVFTL",], aes(x=method, y=sensibility, color = method)) +
+  geom_segment(aes(xend=method, yend=0)) +
+  geom_point(size=4) +
+  scale_color_manual(values = color_method)+
+  theme_bw() +
+  xlab("")+
+  theme(axis.text.x =  element_text(angle =45, hjust = 1),
+        legend.position="none",
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 20),
+        text=element_text(size=15),
+        axis.text=element_text(size=15))+
+  ggtitle("GILGFVFTL")
+#dev.off()
+
+#boxplot
+library(rstatix)
+stat.test <- df_sensibility_all_epitope %>% wilcox_test(sensibility ~ method)
+
+boxplot <- ggplot(data= df_sensibility_all_epitope, aes(x=method, y=sensibility))+
+    geom_boxplot()+
+    geom_dotplot(binaxis='y', stackdir='center', dotsize=0.5, aes(fill = epitope))+
+    theme_bw()+
+    ylim(0,1)+
+    theme(axis.text.x = element_text(angle =45, hjust = 1),
+          legend.position="right",
+          legend.text=element_text(size=15),
+          legend.title=element_text(size=15),
+          text=element_text(size=15),
+          axis.text=element_text(size=15))+
+    scale_fill_manual(values= list_color_epitope)+xlab("")#5x5
+
+stat.test <- stat.test %>% add_xy_position(x = "method")
+stat.test$custom.label <- ifelse(stat.test$p.adj <= 0.05, stat.test$p.adj, "ns")
+
+boxplot <- boxplot + stat_pvalue_manual(stat.test, label = "custom.label", tip.length = 0.01)#non significatif
+
+# pdf("../Plot/SensibilityAllEpitopes.pdf", height=6, width =8)
+# boxplot
+# dev.off()
+
+```
+
+# R Session Info
+
+```{r}
+utils::sessionInfo()
+```
+
