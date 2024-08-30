@@ -2,7 +2,7 @@
 title: "Benchmark tools using pooled database - alpha-beta pairing - CD8 cell subset"
 author: "Charline Jouannet"
 output: github_document
-  html_preview: false
+  html_preview: true
 ---
 
 ```{r setup, include = FALSE}
