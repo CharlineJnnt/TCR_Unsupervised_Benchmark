@@ -8,7 +8,7 @@ Identifying T cell receptor (TCR) specificity is crucial for advancing the under
 ![](Graphical_abstract.jpeg)
 
 ## Analysis
-This repository as the paper is composed of two parts: the process of the curated pooled database and the benchmark analysis of clustering methods. This repository is organized as follow: 
+This repository as the paper is composed of three parts: the process of the curated pooled database, the benchmark analysis of clustering methods and the validation on public data from 10X Genomics. This repository is organized as follow: 
 
 
 ```bash
