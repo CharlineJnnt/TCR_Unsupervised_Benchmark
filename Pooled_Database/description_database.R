@@ -1,15 +1,5 @@
 #Description of human/mouse pooled databases
 
-#Figure 1 of paper
-#B: venn_diagram
-#C: pieChart_db_human + barplot_database_human 
-#D: piechart_cellsubset_human + barplot_cellsubset_human
-#E: barplot_verifiedscore_all_human + barplot_verifiedscore_split_human
-#F: barplot_agscore_all_human + barplot_agscore_split_human 
-#G: count_organism_human
-#H: nb_epitope_TCR_human
-#I: count_epitope_human
-
 library(ggplot2)
 library(dplyr)
 library(gridExtra)
