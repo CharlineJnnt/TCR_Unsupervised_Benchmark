@@ -20,7 +20,6 @@ This repository as the paper is composed of two parts: the process of the curate
 |
 +---Analysis
 |       .Rhistory
-|       benchmark_tools_pooled_database_CD8.html
 |       benchmark_tools_pooled_database_CD8.Rmd
 |       database_processing.R
 |       output_processing.R
